@@ -10,6 +10,9 @@
     "test": "pnpm -r test",
     "lint": "pnpm -r lint"
   },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.8.4"
+  },
   "engines": {
     "node": ">=22"
   }
