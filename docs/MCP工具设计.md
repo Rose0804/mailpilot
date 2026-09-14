@@ -55,7 +55,11 @@ mailpilot://attachment/<account-id>/<attachment-id>/text
 - `list_mailboxes`
 - `search_messages`
 - `get_message`
+- `search_attachments`
+- `get_attachment_metadata`
 - `mailpilot://message/{accountId}/{mailboxId}/{messageId}`
+- `mailpilot://attachment/{accountId}/{attachmentId}/text`
+- `mailpilot://attachment/{accountId}/{attachmentId}/preview`
 
 MCP 返回的邮件正文和资源统一标记为不可信数据。资源 URI 是稳定标识，不返回 Mail.app 内部路径或本地附件绝对路径。
 

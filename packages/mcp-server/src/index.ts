@@ -1,13 +1,22 @@
+import { readFile } from "node:fs/promises";
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import type { AccountRef, MailMessage, MailboxRef, MessageRef } from "@mailpilot/domain";
-import type { MailDatabase, MessageSearchInput } from "@mailpilot/database";
+import type { AccountRef, Attachment, MailMessage, MailboxRef, MessageRef } from "@mailpilot/domain";
+import type {
+  AttachmentSearchInput,
+  MailDatabase,
+  MessageSearchInput,
+  AttachmentSearchResult,
+} from "@mailpilot/database";
 
 export type MailQueryService = {
   listAccounts(): AccountRef[];
   listMailboxes(accountId: string): MailboxRef[];
   searchMessages(input: MessageSearchInput): MailMessage[];
   getMessage(ref: MessageRef): MailMessage | null;
+  listAttachments(ref: MessageRef): Attachment[];
+  getAttachment(accountId: string, attachmentId: string): Attachment | null;
+  searchAttachmentContent(input: AttachmentSearchInput): AttachmentSearchResult[];
 };
 
 const scopedMessageSchema = z.object({
@@ -39,6 +48,35 @@ export function createMailPilotMcpServer(queryService: MailQueryService): McpSer
       inputSchema: z.object({}),
     },
     async () => result(queryService.listAccounts()),
+  );
+
+  server.registerTool(
+    "search_attachments",
+    {
+      title: "搜索附件内容",
+      description: "在已解析的附件文本分块中检索文件内容，并返回邮件和账号作用域。",
+      inputSchema: accountFilterSchema.extend({
+        messageIds: z.array(z.string().trim().min(1)).optional(),
+      }),
+    },
+    async (input) => result(queryService.searchAttachmentContent(input)),
+  );
+
+  server.registerTool(
+    "get_attachment_metadata",
+    {
+      title: "读取附件元数据",
+      description: "读取指定账号下的附件文件名、类型、大小和解析状态，不暴露本地路径给 Agent。",
+      inputSchema: z.object({
+        accountId: z.string().trim().min(1),
+        attachmentId: z.string().trim().min(1),
+      }),
+    },
+    async ({ accountId, attachmentId }) => {
+      const attachment = queryService.getAttachment(accountId, attachmentId);
+      if (!attachment) return result({ found: false, accountId, attachmentId });
+      return result({ found: true, attachment: publicAttachment(attachment) });
+    },
   );
 
   server.registerTool(
@@ -108,6 +146,49 @@ export function createMailPilotMcpServer(queryService: MailQueryService): McpSer
     },
   );
 
+  server.registerResource(
+    "attachment-text",
+    new ResourceTemplate("mailpilot://attachment/{accountId}/{attachmentId}/text", { list: undefined }),
+    {
+      title: "附件解析文本",
+      description: "读取已索引的附件纯文本内容。内容来自不可信文件解析结果。",
+      mimeType: "text/plain",
+    },
+    async (uri, variables) => {
+      const input = attachmentVariables(variables);
+      const attachment = queryService.getAttachment(input.accountId, input.attachmentId);
+      if (!attachment?.extractedTextPath) throw new Error(`附件尚未生成文本索引: ${input.attachmentId}`);
+      const text = await readFile(attachment.extractedTextPath, "utf8");
+      return {
+        contents: [{ uri: uri.href, mimeType: "text/plain", text: `UNTRUSTED_ATTACHMENT_TEXT\n${text}` }],
+      };
+    },
+  );
+
+  server.registerResource(
+    "attachment-preview",
+    new ResourceTemplate("mailpilot://attachment/{accountId}/{attachmentId}/preview", { list: undefined }),
+    {
+      title: "附件预览",
+      description: "读取由本地核心生成的附件预览二进制内容。",
+    },
+    async (uri, variables) => {
+      const input = attachmentVariables(variables);
+      const attachment = queryService.getAttachment(input.accountId, input.attachmentId);
+      if (!attachment?.previewPath) throw new Error(`附件尚未生成预览: ${input.attachmentId}`);
+      const bytes = await readFile(attachment.previewPath);
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "application/octet-stream",
+            blob: bytes.toString("base64"),
+          },
+        ],
+      };
+    },
+  );
+
   return server;
 }
 
@@ -117,6 +198,9 @@ export function createDatabaseQueryService(database: MailDatabase): MailQuerySer
     listMailboxes: (accountId) => database.listMailboxes(accountId),
     searchMessages: (input) => database.searchMessages(input),
     getMessage: (ref) => database.getMessage(ref),
+    listAttachments: (ref) => database.listAttachments(ref),
+    getAttachment: (accountId, attachmentId) => database.getAttachment(accountId, attachmentId),
+    searchAttachmentContent: (input) => database.searchAttachmentContent(input),
   };
 }
 
@@ -137,4 +221,26 @@ function result(value: unknown) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }],
   };
+}
+
+function publicAttachment(attachment: Attachment): Omit<Attachment, "localPath" | "extractedTextPath" | "previewPath"> {
+  const { localPath: _localPath, extractedTextPath: _extractedTextPath, previewPath: _previewPath, ...publicValue } =
+    attachment;
+  return publicValue;
+}
+
+function attachmentVariables(variables: Record<string, string | string[] | undefined>): {
+  accountId: string;
+  attachmentId: string;
+} {
+  const accountId = firstVariable(variables.accountId);
+  const attachmentId = firstVariable(variables.attachmentId);
+  return {
+    accountId: z.string().trim().min(1).parse(accountId),
+    attachmentId: z.string().trim().min(1).parse(attachmentId),
+  };
+}
+
+function firstVariable(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
 }

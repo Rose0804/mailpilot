@@ -99,6 +99,12 @@ importers:
 
   packages/document-indexer:
     dependencies:
+      '@mailpilot/database':
+        specifier: workspace:*
+        version: link:../database
+      '@mailpilot/domain':
+        specifier: workspace:*
+        version: link:../domain
       mammoth:
         specifier: ^1.9.0
         version: 1.12.3
@@ -118,6 +124,9 @@ importers:
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.20.2)(jsdom@25.0.1)
 
   packages/domain:
     devDependencies:
