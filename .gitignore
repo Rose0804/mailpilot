@@ -11,5 +11,6 @@ build/
 *.sqlite-shm
 *.sqlite-wal
 target/
+*.tsbuildinfo
 .idea/
 .vscode/

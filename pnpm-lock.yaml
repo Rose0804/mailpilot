@@ -42,6 +42,24 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(jsdom@25.0.1)
 
+  packages/domain:
+    devDependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(jsdom@25.0.1)
+
+  packages/policy:
+    devDependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(jsdom@25.0.1)
+
 packages:
 
   '@asamuzakjp/css-color@3.2.0':
