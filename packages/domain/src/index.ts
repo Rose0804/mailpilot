@@ -1,10 +1,27 @@
 export type Provider = "apple-mail" | "gmail" | "imap" | "exchange";
 
+export type MailboxRef = {
+  account: AccountRef;
+  mailboxId: string;
+  name: string;
+  unreadCount: number;
+};
+
 export type AccountRef = {
   provider: Provider;
   accountId: string;
   email: string;
   displayName: string;
+};
+
+export type MailMessage = {
+  ref: MessageRef;
+  sender: string;
+  subject: string;
+  receivedAt: string;
+  preview: string;
+  body?: string;
+  isRead: boolean;
 };
 
 export type MessageRef = {

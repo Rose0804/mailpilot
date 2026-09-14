@@ -1,5 +1,5 @@
 {
-  "name": "@mailpilot/sync",
+  "name": "@mailpilot/apple-mail-connector",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -14,11 +14,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@mailpilot/apple-mail-connector": "workspace:*",
-    "@mailpilot/database": "workspace:*",
     "@mailpilot/domain": "workspace:*"
   },
   "devDependencies": {
+    "@types/node": "^22.10.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.9"
   }
