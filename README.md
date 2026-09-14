@@ -12,7 +12,7 @@ MailPilot 是一个本地优先的 Agentic 邮箱工作台，帮助用户理解�
 
 ## 当前状态
 
-项目处于架构和基础设施阶段，当前提交包含产品代码架构、数据模型、MCP 工具边界、安全策略和开发路线。
+当前已完成桌面端邮箱工作台 MVP、示例数据交互、领域契约和基础审批策略。真实 Apple Mail、MCP 和附件索引连接器将在后续阶段接入。
 
 ## 技术路线
 
@@ -66,14 +66,33 @@ mailpilot/
 
 ## 本地开发
 
-当前阶段先完成架构和契约设计。后续初始化依赖后，预计使用以下命令：
+需要 Node.js 22 或更高版本，以及 pnpm 10。
 
 ```bash
 pnpm install
-pnpm dev
-pnpm test
-pnpm lint
+pnpm --filter @mailpilot/desktop dev
 ```
+
+打开终端输出的本地地址即可预览桌面端工作台。当前界面使用示例数据，搜索、账号空间筛选和创建草稿提示可以直接交互。
+
+检查命令：
+
+```bash
+pnpm -r lint
+pnpm -r test
+pnpm --filter @mailpilot/desktop build
+```
+
+## 当前边界
+
+- 当前桌面端尚未连接真实邮箱账号。
+- 当前附件预览使用示例数据。
+- “创建草稿”是产品交互演示，不会向 Mail.app 发送内容。
+- 发送、删除和批量移动的审批策略已定义，但执行连接器尚未接入。
+
+## 开发节奏
+
+每个功能阶段使用一个独立分支和 Conventional Commits。提交前必须从 Git 历史和仓库文档回顾上下文，并通过 lint、test 和 build 检查。
 
 ## 许可证
 
