@@ -1,0 +1,16 @@
+{
+  "name": "mailpilot",
+  "private": true,
+  "version": "0.1.0",
+  "description": "本地优先的 Agentic 邮箱工作台",
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "dev": "pnpm --filter @mailpilot/desktop dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

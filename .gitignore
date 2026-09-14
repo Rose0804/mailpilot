@@ -1,0 +1,15 @@
+node_modules/
+dist/
+build/
+.turbo/
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+target/
+.idea/
+.vscode/
