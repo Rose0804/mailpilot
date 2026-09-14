@@ -16,7 +16,7 @@ MailPilot 是一个本地优先的 Agentic 邮箱工作台，帮助用户理解�
 
 ## 技术路线
 
-- 桌面应用：Tauri 2
+- 桌面应用：Tauri 2（Rust 工具链已安装）
 - 前端：React、TypeScript
 - 本地核心：Rust
 - 数据库：SQLite、FTS5
@@ -66,11 +66,17 @@ mailpilot/
 
 ## 本地开发
 
-需要 Node.js 22 或更高版本，以及 pnpm 10。
+需要 Node.js 22 或更高版本、pnpm 10，以及通过 rustup 安装的 Rust stable 工具链。
 
 ```bash
 pnpm install
 pnpm --filter @mailpilot/desktop dev
+```
+
+如果终端尚未加载 Rust：
+
+```bash
+source "$HOME/.cargo/env"
 ```
 
 打开终端输出的本地地址即可预览桌面端工作台。当前界面使用示例数据，搜索、账号空间筛选和创建草稿提示可以直接交互。
@@ -86,6 +92,7 @@ pnpm --filter @mailpilot/desktop build
 ## 当前边界
 
 - 当前桌面端尚未连接真实邮箱账号。
+- 当前 Tauri 原生壳还未完成初始化，现阶段使用 Vite 浏览器原型。
 - 当前附件预览使用示例数据。
 - “创建草稿”是产品交互演示，不会向 Mail.app 发送内容。
 - 发送、删除和批量移动的审批策略已定义，但执行连接器尚未接入。
