@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface, type Interface } from "node:readline";
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import type { AgentStep } from "@mailpilot/domain";
 
 export type AgentSession = {
@@ -70,10 +71,9 @@ export type DshEvent =
   | { type: "run.failed"; message: string };
 
 export type DshSessionOptions = {
+  sessionId?: string;
   title?: string;
   accountIds?: string[];
-  systemPrompt?: string;
-  mcpServers?: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
 };
 
 export type DshTransport = {
@@ -81,13 +81,15 @@ export type DshTransport = {
   sendMessage(sessionId: string, text: string): AsyncIterable<DshEvent>;
   respondToApproval(sessionId: string, approvalId: string, approved: boolean): Promise<void>;
   closeSession(sessionId: string): Promise<void>;
+  close(): Promise<void>;
 };
 
 export interface AgentRuntime {
-  createSession(options?: Omit<DshSessionOptions, "systemPrompt" | "mcpServers">): Promise<AgentSession>;
+  createSession(options?: DshSessionOptions): Promise<AgentSession>;
   streamMessage(message: AgentMessage): AsyncIterable<AgentEvent>;
   respondToApproval(sessionId: string, approvalId: string, approved: boolean): Promise<void>;
   closeSession(sessionId: string): Promise<void>;
+  close(): Promise<void>;
 }
 
 export type SessionEventListener = (event: AgentEvent) => void;
@@ -116,19 +118,16 @@ export class SessionEventBridge {
 export class DshRuntimeAdapter implements AgentRuntime {
   readonly events = new SessionEventBridge();
   private readonly sessions = new Map<string, AgentSession>();
+  private readonly accountScopes = new Map<string, string[] | undefined>();
 
   constructor(
     private readonly transport: DshTransport,
-    private readonly options: Pick<DshSessionOptions, "systemPrompt" | "mcpServers"> = {},
   ) {}
 
   async createSession(
-    options: Omit<DshSessionOptions, "systemPrompt" | "mcpServers"> = {},
+    options: DshSessionOptions = {},
   ): Promise<AgentSession> {
-    const started = await this.transport.startSession({
-      ...this.options,
-      ...options,
-    });
+    const started = await this.transport.startSession(options);
     const session: AgentSession = {
       sessionId: started.sessionId,
       createdAt: started.createdAt ?? new Date().toISOString(),
@@ -136,6 +135,7 @@ export class DshRuntimeAdapter implements AgentRuntime {
       accountIds: options.accountIds,
     };
     this.sessions.set(session.sessionId, session);
+    this.accountScopes.set(session.sessionId, options.accountIds);
     this.events.publish({ type: "session.started", session });
     return session;
   }
@@ -144,7 +144,8 @@ export class DshRuntimeAdapter implements AgentRuntime {
     if (!this.sessions.has(message.sessionId)) {
       throw new Error(`未找到 Agent 会话: ${message.sessionId}`);
     }
-    for await (const dshEvent of this.transport.sendMessage(message.sessionId, message.text)) {
+    const scopedText = withAccountScope(message.text, this.accountScopes.get(message.sessionId));
+    for await (const dshEvent of this.transport.sendMessage(message.sessionId, scopedText)) {
       const event = normalizeEvent(message.sessionId, dshEvent);
       this.events.publish(event);
       yield event;
@@ -162,33 +163,68 @@ export class DshRuntimeAdapter implements AgentRuntime {
     if (!this.sessions.has(sessionId)) return;
     await this.transport.closeSession(sessionId);
     this.sessions.delete(sessionId);
+    this.accountScopes.delete(sessionId);
+  }
+
+  async close(): Promise<void> {
+    await this.transport.close();
+    this.sessions.clear();
+    this.accountScopes.clear();
   }
 }
 
-type JsonLineTransportOptions = {
+export type JsonLineTransportOptions = {
   command: string;
   args?: string[];
+  patches?: string[];
   cwd?: string;
   env?: Record<string, string>;
+  provider?: string;
+  model?: string;
+  reasoningEffort?: string;
+  maxTokens?: number;
 };
 
-type JsonLineCommand = {
-  type: "session.start" | "message.send" | "approval.respond" | "session.close";
-  sessionId?: string;
-  text?: string;
-  approvalId?: string;
-  approved?: boolean;
-  options?: DshSessionOptions;
+type JsonRpcRequest = {
+  jsonrpc: "2.0";
+  id: string | number;
+  method: "initialize" | "session/prompt" | "shutdown";
+  params?: Record<string, unknown>;
+};
+
+type JsonRpcResponse = {
+  jsonrpc: "2.0";
+  id: string | number;
+  result?: unknown;
+  error?: { code: number; message: string; data?: unknown };
+};
+
+type JsonRpcNotification = {
+  jsonrpc: "2.0";
+  method: "session.event" | "session.status" | "subagent.started" | "subagent.finished";
+  params: Record<string, unknown>;
 };
 
 export class JsonLineDshTransport implements DshTransport {
+  private readonly options: JsonLineTransportOptions;
   private readonly process: ChildProcessWithoutNullStreams;
   private readonly lines: Interface;
   private readonly queues = new Map<string, AsyncEventQueue>();
-  private readonly pendingSessions = new Map<string, (value: { sessionId: string; createdAt?: string }) => void>();
+  private readonly pending = new Map<
+    string | number,
+    { resolve: (value: unknown) => void; reject: (error: Error) => void }
+  >();
+  private readonly sessions = new Set<string>();
+  private nextRequestId = 1;
+  private initialized: Promise<void> | undefined;
+  private closed = false;
 
   constructor(options: JsonLineTransportOptions) {
-    this.process = spawn(options.command, options.args ?? [], {
+    this.options = options;
+    this.process = spawn(options.command, [
+      ...(options.args ?? []),
+      ...(options.patches ?? []).flatMap((patch) => ["--patch", patch]),
+    ], {
       cwd: options.cwd,
       env: { ...process.env, ...options.env },
       stdio: ["pipe", "pipe", "pipe"],
@@ -200,82 +236,205 @@ export class JsonLineDshTransport implements DshTransport {
     });
     this.process.on("exit", (code) => {
       const message = `DSH 进程已退出，状态码: ${code ?? "unknown"}`;
+      for (const pending of this.pending.values()) pending.reject(new Error(message));
+      this.pending.clear();
       for (const queue of this.queues.values()) queue.fail(new Error(message));
       this.queues.clear();
     });
   }
 
   async startSession(options: DshSessionOptions): Promise<{ sessionId: string; createdAt?: string }> {
-    const requestId = randomUUID();
-    const sessionId = `pending:${requestId}`;
-    const result = new Promise<{ sessionId: string; createdAt?: string }>((resolve) => {
-      this.pendingSessions.set(requestId, resolve);
-    });
-    this.write({ type: "session.start", sessionId: requestId, options });
-    return result;
+    await this.initializeRuntime(options);
+    const sessionId = options.sessionId ?? `session-${randomUUID().replaceAll("-", "")}`;
+    this.sessions.add(sessionId);
+    return {
+      sessionId,
+      createdAt: new Date().toISOString(),
+    };
   }
 
   sendMessage(sessionId: string, text: string): AsyncIterable<DshEvent> {
     const queue = new AsyncEventQueue();
     this.queues.set(sessionId, queue);
-    this.write({ type: "message.send", sessionId, text });
+    void this.prompt(sessionId, text, queue);
     return queue;
   }
 
   async respondToApproval(sessionId: string, approvalId: string, approved: boolean): Promise<void> {
-    this.write({ type: "approval.respond", sessionId, approvalId, approved });
+    void sessionId;
+    void approvalId;
+    void approved;
+    throw new Error("DSH SDK 当前没有公开的审批回传方法，审批由 MailPilot Policy 处理");
   }
 
   async closeSession(sessionId: string): Promise<void> {
-    this.write({ type: "session.close", sessionId });
     this.queues.get(sessionId)?.finish();
     this.queues.delete(sessionId);
-    if (this.queues.size === 0) {
-      this.lines.close();
-      this.process.kill();
+    this.sessions.delete(sessionId);
+    if (this.sessions.size > 0 || this.closed) return;
+    await this.request("shutdown").catch(() => undefined);
+    this.closed = true;
+    this.lines.close();
+    this.process.stdin.end();
+    this.process.kill();
+  }
+
+  async close(): Promise<void> {
+    if (this.closed) return;
+    for (const queue of this.queues.values()) queue.finish();
+    this.queues.clear();
+    this.sessions.clear();
+    await this.request("shutdown").catch(() => undefined);
+    this.closed = true;
+    this.lines.close();
+    this.process.stdin.end();
+    this.process.kill();
+  }
+
+  private async initializeRuntime(options: DshSessionOptions): Promise<void> {
+    this.initialized ??= (async () => {
+      await this.request("initialize", {
+        cwd: resolve(this.options.cwd ?? process.cwd()),
+        provider: this.options.provider ?? "deepseek-official",
+        model: this.options.model ?? "deepseek-v4-flash",
+        ...(this.options.reasoningEffort ? { reasoningEffort: this.options.reasoningEffort } : {}),
+        ...(this.options.maxTokens ? { maxTokens: this.options.maxTokens } : {}),
+      });
+      void options.title;
+    })();
+    await this.initialized;
+  }
+
+  private async prompt(sessionId: string, text: string, queue: AsyncEventQueue): Promise<void> {
+    try {
+      await this.initializeRuntime({});
+      await this.request("session/prompt", {
+        sessionId,
+        contentBlocks: [{ type: "text", text }],
+      });
+    } catch (error) {
+      queue.fail(error instanceof Error ? error : new Error(String(error)));
+      this.queues.delete(sessionId);
     }
   }
 
-  private write(command: JsonLineCommand): void {
+  private request(method: JsonRpcRequest["method"], params?: Record<string, unknown>): Promise<unknown> {
+    if (this.closed) return Promise.reject(new Error("DSH transport 已关闭"));
+    const id = `mailpilot-${this.nextRequestId++}`;
+    const request: JsonRpcRequest = {
+      jsonrpc: "2.0",
+      id,
+      method,
+      ...(params ? { params } : {}),
+    };
+    const result = new Promise<unknown>((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
+    });
+    try {
+      this.write(request);
+    } catch (error) {
+      this.pending.delete(id);
+      return Promise.reject(error);
+    }
+    return result;
+  }
+
+  private write(command: JsonRpcRequest): void {
     if (!this.process.stdin.writable) throw new Error("DSH 进程 stdin 不可写");
     this.process.stdin.write(`${JSON.stringify(command)}\n`);
   }
 
   private handleLine(line: string): void {
-    let event: DshEvent & { requestId?: string; sessionId?: string };
+    let event: JsonRpcResponse | JsonRpcNotification;
     try {
       event = JSON.parse(line) as typeof event;
     } catch {
       return;
     }
-    if (event.type === "session.started" && event.requestId) {
-      this.pendingSessions.get(event.requestId)?.({
-        sessionId: event.sessionId ?? event.requestId,
-        createdAt: event.createdAt,
-      });
-      this.pendingSessions.delete(event.requestId);
+    if ("id" in event) {
+      const pending = this.pending.get(event.id);
+      if (!pending) return;
+      this.pending.delete(event.id);
+      if (event.error) pending.reject(new Error(`DSH JSON-RPC ${event.error.code}: ${event.error.message}`));
+      else pending.resolve(event.result);
       return;
     }
-    if (!event.sessionId) return;
-    const queue = this.queues.get(event.sessionId);
-    if (!queue) return;
-    queue.push(event);
-    if (event.type === "run.completed" || event.type === "run.failed") {
-      queue.finish();
-      this.queues.delete(event.sessionId);
+    if (event.method === "session.status") {
+      const sessionId = String(event.params.sessionId ?? "");
+      if (event.params.status === "idle") {
+        this.queues.get(sessionId)?.finish();
+        this.queues.delete(sessionId);
+      }
+      return;
     }
+    if (event.method !== "session.event") return;
+    const sessionId = String(event.params.sessionId ?? "");
+    const queue = this.queues.get(sessionId);
+    if (!queue) return;
+    const normalized = normalizeDshSessionEvent(event.params.event, sessionId);
+    if (normalized) queue.push(normalized);
   }
+}
+
+function normalizeDshSessionEvent(raw: unknown, sessionId: string): DshEvent | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const event = raw as { type?: unknown; data?: unknown };
+  const type = String(event.type ?? "");
+  const data = (event.data ?? {}) as Record<string, unknown>;
+  if (type === "assistant/message") {
+    const message = (data.message ?? data) as { content?: unknown };
+    const content = Array.isArray(message.content) ? message.content : [];
+    const text = content
+      .filter((block): block is { type: "text"; text: string } => {
+        return (
+          typeof block === "object" &&
+          block !== null &&
+          (block as { type?: unknown }).type === "text" &&
+          typeof (block as { text?: unknown }).text === "string"
+        );
+      })
+      .map((block) => block.text)
+      .join("");
+    return { type: "assistant.message", text };
+  }
+  if (type === "tool/call" || type === "tool/result") {
+    const toolData = (data.tool ?? data) as Record<string, unknown>;
+    if (type === "tool/call") {
+      return {
+        type: "tool.call",
+        tool: String(toolData.name ?? toolData.tool ?? "unknown"),
+        inputSummary: JSON.stringify(toolData.input ?? toolData.arguments ?? {}),
+      };
+    }
+    return {
+      type: "tool.result",
+      tool: String(toolData.name ?? toolData.tool ?? "unknown"),
+      outputSummary: JSON.stringify(toolData.output ?? toolData.result ?? {}),
+      status: "success",
+    };
+  }
+  if (type === "turn/end") {
+    const reason = (data.reason ?? {}) as Record<string, unknown>;
+    const kind = String(reason.kind ?? "");
+    return kind === "error"
+      ? { type: "run.failed", message: String(reason.message ?? "DSH 运行失败") }
+      : { type: "run.completed" };
+  }
+  return undefined;
 }
 
 class AsyncEventQueue implements AsyncIterable<DshEvent> {
   private readonly values: DshEvent[] = [];
-  private readonly waiters: Array<(result: IteratorResult<DshEvent>) => void> = [];
+  private readonly waiters: Array<{
+    resolve: (result: IteratorResult<DshEvent>) => void;
+    reject: (error: Error) => void;
+  }> = [];
   private closed = false;
   private failure: Error | undefined;
 
   push(value: DshEvent): void {
     const waiter = this.waiters.shift();
-    if (waiter) waiter({ done: false, value });
+    if (waiter) waiter.resolve({ done: false, value });
     else this.values.push(value);
   }
 
@@ -287,7 +446,7 @@ class AsyncEventQueue implements AsyncIterable<DshEvent> {
   fail(error: Error): void {
     this.failure = error;
     this.closed = true;
-    this.flush();
+    while (this.waiters.length > 0) this.waiters.shift()?.reject(error);
   }
 
   [Symbol.asyncIterator](): AsyncIterator<DshEvent> {
@@ -297,7 +456,9 @@ class AsyncEventQueue implements AsyncIterable<DshEvent> {
         const value = this.values.shift();
         if (value) return { done: false, value };
         if (this.closed) return { done: true, value: undefined };
-        return new Promise<IteratorResult<DshEvent>>((resolve) => this.waiters.push(resolve));
+        return new Promise<IteratorResult<DshEvent>>((resolve, reject) => {
+          this.waiters.push({ resolve, reject });
+        });
       },
     };
   }
@@ -305,7 +466,7 @@ class AsyncEventQueue implements AsyncIterable<DshEvent> {
   private flush(): void {
     while (this.waiters.length > 0) {
       const waiter = this.waiters.shift();
-      if (waiter) waiter({ done: true, value: undefined });
+      if (waiter) waiter.resolve({ done: true, value: undefined });
     }
   }
 }
@@ -342,6 +503,16 @@ function normalizeEvent(sessionId: string, event: DshEvent): AgentEvent {
     case "run.failed":
       return { type: "run.failed", sessionId, message: event.message };
   }
+}
+
+function withAccountScope(text: string, accountIds: string[] | undefined): string {
+  if (!accountIds?.length) return text;
+  const scope = accountIds.join(", ");
+  return [
+    `MailPilot scope: only use accountId values [${scope}] for this session.`,
+    "Do not infer or switch to another account without asking the user.",
+    `User request: ${text}`,
+  ].join("\n");
 }
 
 export function toAgentStep(event: Extract<AgentEvent, { type: "tool.call" | "tool.result" }>, runId: string): AgentStep {

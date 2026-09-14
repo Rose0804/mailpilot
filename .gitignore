@@ -10,6 +10,7 @@ build/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+.mailpilot/
 target/
 *.tsbuildinfo
 .idea/

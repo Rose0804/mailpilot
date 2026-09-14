@@ -127,6 +127,49 @@ button {
   border-radius: 50%;
 }
 
+.sync-dot-checking {
+  background: #b17a36;
+}
+
+.sync-dot-offline {
+  background: #9a6359;
+}
+
+.sync-dot-sync-error {
+  background: #b17a36;
+}
+
+.sync-button {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  margin-left: 3px;
+  place-items: center;
+  color: #79766d;
+  background: transparent;
+  border-radius: 7px;
+}
+
+.sync-button:hover:not(:disabled) {
+  color: #346d53;
+  background: #edf2eb;
+}
+
+.sync-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .user-avatar {
   display: grid;
   width: 30px;
@@ -372,6 +415,35 @@ h1 {
 .mail-list {
   display: grid;
   gap: 4px;
+}
+
+.empty-list-state {
+  display: grid;
+  justify-items: center;
+  min-height: 160px;
+  padding: 34px 24px;
+  color: #817d73;
+  background: #f6f4ee;
+  border: 1px dashed #dfdbd0;
+  border-radius: 10px;
+  text-align: center;
+}
+
+.empty-list-state svg {
+  margin-bottom: 10px;
+  color: #597c9d;
+}
+
+.empty-list-state strong {
+  color: #4d4b44;
+  font-size: 12px;
+}
+
+.empty-list-state span {
+  max-width: 280px;
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .mail-row {
@@ -639,6 +711,19 @@ h2 {
   font-weight: 600;
 }
 
+.empty-inspector-state {
+  display: flex;
+  align-items: center;
+  min-height: 64px;
+  padding: 12px;
+  gap: 8px;
+  color: #8a867d;
+  background: #f6f4ee;
+  border: 1px dashed #dfdbd0;
+  border-radius: 8px;
+  font-size: 11px;
+}
+
 .icon-button {
   display: grid;
   width: 26px;
@@ -647,6 +732,11 @@ h2 {
   color: #77736a;
   background: #f3f1eb;
   border-radius: 7px;
+}
+
+.icon-button-disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .change-list {
@@ -723,6 +813,59 @@ h2 {
   margin-left: 4px;
   color: #346d53;
   background: transparent;
+}
+
+.agent-activity {
+  margin-top: 28px;
+  padding: 14px;
+  background: #f6f4ee;
+  border: 1px solid #e5e1d8;
+  border-radius: 10px;
+}
+
+.agent-activity-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #346d53;
+  font-size: 11px;
+}
+
+.agent-activity-heading .agent-prompt-icon {
+  width: 23px;
+  height: 23px;
+}
+
+.agent-activity-heading > span:last-child {
+  margin-left: auto;
+  color: #817d73;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.agent-event-list {
+  display: grid;
+  margin-top: 12px;
+  gap: 9px;
+}
+
+.agent-event {
+  padding-left: 10px;
+  border-left: 2px solid #c9e1d2;
+}
+
+.agent-event small {
+  color: #8a867d;
+  font-size: 8px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.agent-event p {
+  margin: 3px 0 0;
+  color: #4d4b44;
+  font-size: 10px;
+  line-height: 1.45;
 }
 
 @media (max-height: 840px) {

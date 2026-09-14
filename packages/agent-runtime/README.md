@@ -9,14 +9,13 @@
 - MailPilot Policy 负责账号作用域、审批和审计，DSH 不是安全边界。
 - UI 只订阅 `AgentEvent`，不解析 DSH 私有协议。
 
-当前提供 `DshRuntimeAdapter` 和 `JsonLineDshTransport`。后者约定 DSH 进程通过 stdin/stdout 交换 JSONL：
+当前提供 `DshRuntimeAdapter` 和 `JsonLineDshTransport`。后者对接 DSH SDK 的 stdin/stdout JSON-RPC：
 
 ```json
-{"type":"session.start","sessionId":"request-id","options":{"mcpServers":{}}}
-{"type":"session.started","requestId":"request-id","sessionId":"session-id"}
-{"type":"message.send","sessionId":"session-id","text":"找续约邮件"}
-{"type":"tool.call","sessionId":"session-id","tool":"search_messages"}
-{"type":"approval.respond","sessionId":"session-id","approvalId":"approval-id","approved":true}
+{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"cwd":"/workspace","provider":"deepseek-official","model":"deepseek-v4-flash"}}
+{"jsonrpc":"2.0","id":"2","method":"session/prompt","params":{"sessionId":"session-id","contentBlocks":[{"type":"text","text":"找续约邮件"}]}}
+{"jsonrpc":"2.0","method":"session.event","params":{"sessionId":"session-id","event":{"type":"assistant/message","data":{"message":{"content":[{"type":"text","text":"我找到 1 封邮件。"}]}}}}}
+{"jsonrpc":"2.0","method":"session.status","params":{"sessionId":"session-id","status":"idle"}}
 ```
 
-这个协议是本地适配契约，不假设仓库里已经安装某个 DSH CLI。真正接入时只需把 `command` 指向已安装的 harness，并让它连接 MailPilot MCP stdio server。
+DSH 的 MCP 工具通过 profile patch 配置 `@deepseek-ai/dsh-mcp-client`，以 `mcp__mailpilot__<tool>` 形式出现在模型工具列表中。MailPilot 不把 `mcpServers` 伪装成 `initialize` 参数，也不把 DSH 当作审批边界；发送、删除和批量变更仍由 MailPilot Policy 拦截。

@@ -6,6 +6,9 @@
   "packageManager": "pnpm@10.0.0",
   "scripts": {
     "dev": "pnpm --filter @mailpilot/desktop dev",
+    "dev:local": "./scripts/dev-local.sh",
+    "tauri:dev": ". \"$HOME/.cargo/env\" && tauri dev",
+    "tauri:build": ". \"$HOME/.cargo/env\" && tauri build",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "lint": "pnpm -r lint"

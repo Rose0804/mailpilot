@@ -28,14 +28,26 @@ describe("本地邮件数据库", () => {
       indexStatus: "ready",
     });
     database.upsertAttachmentChunk("a-1", 0, "Payment schedule changed to net 45");
+    database.upsertMailbox({ account, mailboxId: "INBOX", name: "Inbox", unreadCount: 7 });
+    database.upsertMessage({
+      ref: { account, mailboxId: "INBOX", messageId: "m-2" },
+      sender: "Alex",
+      subject: "Follow up",
+      receivedAt: "2026-09-14T10:00:00Z",
+      preview: "Unread",
+      isRead: false,
+    });
 
     const rows = database.searchMessages({ accountIds: ["work"], query: "renewal" });
     expect(rows).toHaveLength(1);
     expect(rows[0].ref.account.email).toBe("siyuan@loomos.ai");
     expect(database.listAccounts()[0].accountId).toBe("work");
     expect(database.listMailboxes("work")[0].mailboxId).toBe("INBOX");
+    expect(database.listMailboxes("work")[0].account.accountId).toBe("work");
+    expect(database.listMailboxes("work")[0].unreadCount).toBe(7);
     expect(database.getMessage(rows[0].ref)?.subject).toBe("Renewal terms");
     expect(database.listAttachments(rows[0].ref)[0].filename).toBe("renewal.xlsx");
+    expect(database.listAttachments(rows[0].ref)[0].message.account.accountId).toBe("work");
     expect(database.getAttachment("work", "a-1")?.message.messageId).toBe("m-1");
     expect(database.searchAttachmentContent({ query: "net 45" })[0].attachment.id).toBe("a-1");
     expect(

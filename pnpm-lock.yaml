@@ -137,6 +137,37 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.2)(jsdom@25.0.1)
 
+  packages/local-api:
+    dependencies:
+      '@mailpilot/agent-runtime':
+        specifier: workspace:*
+        version: link:../agent-runtime
+      '@mailpilot/apple-mail-connector':
+        specifier: workspace:*
+        version: link:../apple-mail-connector
+      '@mailpilot/database':
+        specifier: workspace:*
+        version: link:../database
+      '@mailpilot/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@mailpilot/sync':
+        specifier: workspace:*
+        version: link:../sync
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.20.2
+      tsx:
+        specifier: ^4.19.2
+        version: 4.23.13
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.20.2)(jsdom@25.0.1)
+
   packages/mcp-server:
     dependencies:
       '@mailpilot/apple-mail-connector':

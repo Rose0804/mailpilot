@@ -131,12 +131,7 @@ export class MailDatabase {
   }
 
   upsertMessage(message: MailMessage): void {
-    this.upsertMailbox({
-      account: message.ref.account,
-      mailboxId: message.ref.mailboxId,
-      name: message.ref.mailboxId,
-      unreadCount: 0,
-    });
+    this.ensureMailbox(message.ref);
     this.db
       .prepare(`
         INSERT INTO messages (
@@ -389,6 +384,17 @@ export class MailDatabase {
       FROM messages
     `);
   }
+
+  private ensureMailbox(ref: MessageRef): void {
+    this.upsertAccount(ref.account);
+    this.db
+      .prepare(`
+        INSERT INTO mailboxes (account_id, id, name, unread_count)
+        VALUES (?, ?, ?, 0)
+        ON CONFLICT(account_id, id) DO NOTHING
+      `)
+      .run(ref.account.accountId, ref.mailboxId, ref.mailboxId);
+  }
 }
 
 function toFtsQuery(query: string): string {
@@ -420,7 +426,7 @@ function toMailMessage(row: Record<string, unknown>): MailMessage {
 
 function toAccount(row: Record<string, unknown>): AccountRef {
   return {
-    accountId: String(row.id ?? row.account_id),
+    accountId: String(row.account_id ?? row.id),
     provider: String(row.provider) as AccountRef["provider"],
     email: String(row.email),
     displayName: String(row.display_name),

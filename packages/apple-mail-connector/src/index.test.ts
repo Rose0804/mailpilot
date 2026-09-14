@@ -57,4 +57,28 @@ describe("Apple Mail 只读连接器", () => {
     const connector = new AppleMailConnector(new FakeJxaExecutor());
     await expect(connector.listMailboxes("Missing")).rejects.toThrow("未找到邮箱账号");
   });
+
+  it("账号标识优先使用邮箱地址以区分同名账号", async () => {
+    const executor: JxaExecutor = {
+      run: async (script) =>
+        script.includes("Mail.accounts().map")
+          ? JSON.stringify([
+              {
+                accountId: "one@example.com",
+                displayName: "Work",
+                email: "one@example.com",
+                provider: "apple-mail",
+              },
+              {
+                accountId: "two@example.com",
+                displayName: "Work",
+                email: "two@example.com",
+                provider: "apple-mail",
+              },
+            ])
+          : JSON.stringify([]),
+    };
+    const accounts = await new AppleMailConnector(executor).listAccounts();
+    expect(accounts.map((item) => item.accountId)).toEqual(["one@example.com", "two@example.com"]);
+  });
 });

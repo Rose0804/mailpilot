@@ -11,6 +11,7 @@ export type MailItem = {
   id: string;
   accountId: string;
   initials: string;
+  messageId?: string;
   sender: string;
   email: string;
   subject: string;
@@ -20,6 +21,8 @@ export type MailItem = {
   labelTone?: "amber" | "blue" | "green" | "neutral";
   unread?: boolean;
   avatarTone: "green" | "blue" | "amber" | "brown";
+  mailboxId?: string;
+  receivedAtIso?: string;
 };
 
 export type Attachment = {
@@ -139,3 +142,71 @@ Maya`,
     },
   ],
 };
+
+export function mapApiAccount(account: {
+  accountId: string;
+  displayName: string;
+  email: string;
+  provider: string;
+}): MailAccount {
+  const color = account.accountId.toLowerCase().includes("personal") ? "amber" : "blue";
+  return {
+    id: account.accountId,
+    name: account.displayName || account.email,
+    email: account.email,
+    provider: account.provider,
+    color,
+    unread: 0,
+  };
+}
+
+export function mapApiMessage(message: {
+  accountId: string;
+  mailboxId: string;
+  messageId: string;
+  sender: string;
+  subject: string;
+  preview: string;
+  receivedAt: string;
+  isRead: boolean;
+}): MailItem {
+  const senderName = message.sender.split("<")[0]?.trim() || message.sender;
+  const initials = senderName
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  const avatarTones = ["green", "blue", "amber", "brown"] as const;
+  const toneIndex = [...message.messageId].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return {
+    id: `${message.accountId}|${message.mailboxId}|${message.messageId}`,
+    accountId: message.accountId,
+    mailboxId: message.mailboxId,
+    messageId: message.messageId,
+    initials: initials || "?",
+    sender: senderName,
+    email: message.sender.match(/<([^>]+)>/)?.[1] ?? message.sender,
+    subject: message.subject || "(无主题)",
+    preview: message.preview,
+    receivedAt: formatReceivedAt(message.receivedAt),
+    receivedAtIso: message.receivedAt,
+    label: message.isRead ? undefined : "NEW",
+    labelTone: message.isRead ? undefined : "green",
+    unread: !message.isRead,
+    avatarTone: avatarTones[toneIndex % avatarTones.length],
+  };
+}
+
+function formatReceivedAt(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const now = new Date();
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  return sameDay
+    ? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    : date.toLocaleDateString([], { month: "short", day: "numeric" });
+}

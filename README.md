@@ -12,7 +12,7 @@ MailPilot 是一个本地优先的 Agentic 邮箱工作台，帮助用户理解�
 
 ## 当前状态
 
-当前已完成桌面端邮箱工作台 MVP、Apple Mail 只读连接器、本地 SQLite/FTS5 索引、全量账号同步、邮件与附件只读 MCP Server、附件文本索引和 DSH 会话适配层。桌面端真实 API 和写操作仍在后续阶段接入。
+当前已完成桌面端邮箱工作台 MVP、Apple Mail 只读连接器、本地 SQLite/FTS5 索引、全量账号同步、邮件与附件只读 MCP Server、附件文本索引、本地 API 和 DSH 会话适配层。桌面端可以通过本地 API 读取真实索引；写操作和 Mail.app 附件自动抓取仍未接入。
 
 ## 技术路线
 
@@ -73,6 +73,12 @@ pnpm install
 pnpm --filter @mailpilot/desktop dev
 ```
 
+要启动 Tauri 2 原生壳和本地 API：
+
+```bash
+pnpm tauri:dev
+```
+
 如果终端尚未加载 Rust：
 
 ```bash
@@ -91,7 +97,9 @@ pnpm --filter @mailpilot/sync sync
 pnpm --filter @mailpilot/mcp-server exec tsx src/cli.ts
 ```
 
-MCP Server 通过 stdio 提供 `list_accounts`、`list_mailboxes`、`search_messages`、`get_message` 及 `mailpilot://message/...` 资源。桌面端仍可通过下面的命令预览工作台。
+MCP Server 通过 stdio 提供账号、邮箱、邮件和附件查询工具，以及 `mailpilot://message/...`、`mailpilot://attachment/...` 资源。桌面端通过本地 API 读取同一份 SQLite 索引；附件检查器的打开按钮会访问受控的本地文本预览接口。
+
+启动本地 API 后，桌面端默认访问 `http://127.0.0.1:3100`。设置 `MAILPILOT_DSH_COMMAND=dsh` 后，API 会为 DSH 生成隔离的 `DSH_HOME`、SDK profile patch，并将 MailPilot MCP 挂载到 DSH。
 
 检查命令：
 
@@ -103,11 +111,12 @@ pnpm --filter @mailpilot/desktop build
 
 ## 当前边界
 
-- 当前桌面端 UI 尚未接入本地产品 API，仍使用示例数据。
-- 当前 Tauri 原生壳还未完成初始化，现阶段使用 Vite 浏览器原型。
-- 当前桌面端附件预览 UI 仍使用示例数据；本地核心已能保存原文件、提取文本并通过 MCP 资源读取。
-- “创建草稿”是产品交互演示，不会向 Mail.app 发送内容。
-- 发送、删除和批量移动的审批策略已定义，但执行连接器尚未接入。
+- 当前桌面端 UI 已接入本地产品 API；只有 API 连接失败时才回退到示例数据，空索引会显示真实空状态。
+- Tauri 2 原生壳已初始化；生产打包仍需要完整 Cargo 网络缓存、Apple 签名和自动化权限配置。
+- 本地附件索引器已支持 PDF、DOCX、XLSX 和文本文件；Apple Mail 连接器当前只读邮件头和正文，尚未自动提取 Mail.app 附件二进制。
+- “创建草稿”是产品交互演示，不会向 Mail.app 写入内容。
+- 发送、回复、删除和批量移动的审批策略已定义，但执行连接器尚未接入。
+- DSH 适配层只有在本机安装并配置 `dsh` 命令后才会启用；没有 DSH 时，邮件查询链路仍可独立使用。
 
 ## 开发节奏
 
