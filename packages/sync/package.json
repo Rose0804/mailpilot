@@ -1,0 +1,12 @@
+{
+  "name": "@mailpilot/sync",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "dependencies": {
+    "@mailpilot/domain": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "@mailpilot/document-indexer",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "dependencies": {
+    "mammoth": "^1.9.0",
+    "pdfjs-dist": "^4.10.38",
+    "sharp": "^0.33.5",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}
