@@ -114,6 +114,15 @@ importers:
 
   packages/mcp-server:
     dependencies:
+      '@mailpilot/apple-mail-connector':
+        specifier: workspace:*
+        version: link:../apple-mail-connector
+      '@mailpilot/database':
+        specifier: workspace:*
+        version: link:../database
+      '@mailpilot/domain':
+        specifier: workspace:*
+        version: link:../domain
       '@modelcontextprotocol/server':
         specifier: ^2.0.0
         version: 2.0.0
@@ -130,6 +139,9 @@ importers:
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.20.2)(jsdom@25.0.1)
 
   packages/policy:
     devDependencies:
@@ -152,6 +164,9 @@ importers:
         specifier: workspace:*
         version: link:../domain
     devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.23.13
       typescript:
         specifier: ^5.7.2
         version: 5.9.3

@@ -21,4 +21,13 @@ export class MailSyncService {
     }
     return { accountId, mailboxes: mailboxes.length, messages: messageCount };
   }
+
+  async syncAll(): Promise<Array<{ accountId: string; mailboxes: number; messages: number }>> {
+    const accounts = await this.reader.listAccounts();
+    const results = [];
+    for (const account of accounts) {
+      results.push(await this.syncInbox(account.accountId));
+    }
+    return results;
+  }
 }

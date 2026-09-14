@@ -12,7 +12,7 @@ MailPilot 是一个本地优先的 Agentic 邮箱工作台，帮助用户理解�
 
 ## 当前状态
 
-当前已完成桌面端邮箱工作台 MVP、示例数据交互、领域契约和基础审批策略。真实 Apple Mail、MCP 和附件索引连接器将在后续阶段接入。
+当前已完成桌面端邮箱工作台 MVP、Apple Mail 只读连接器、本地 SQLite/FTS5 索引、全量账号同步和只读 MCP Server。DSH 会话适配、附件索引和写操作仍在后续阶段接入。
 
 ## 技术路线
 
@@ -79,7 +79,19 @@ pnpm --filter @mailpilot/desktop dev
 source "$HOME/.cargo/env"
 ```
 
-打开终端输出的本地地址即可预览桌面端工作台。当前界面使用示例数据，搜索、账号空间筛选和创建草稿提示可以直接交互。
+首次使用真实 Apple Mail 数据时，先同步本机 Mail.app：
+
+```bash
+pnpm --filter @mailpilot/sync sync
+```
+
+然后启动只读 MCP Server：
+
+```bash
+pnpm --filter @mailpilot/mcp-server exec tsx src/cli.ts
+```
+
+MCP Server 通过 stdio 提供 `list_accounts`、`list_mailboxes`、`search_messages`、`get_message` 及 `mailpilot://message/...` 资源。桌面端仍可通过下面的命令预览工作台。
 
 检查命令：
 
@@ -91,7 +103,7 @@ pnpm --filter @mailpilot/desktop build
 
 ## 当前边界
 
-- 当前桌面端尚未连接真实邮箱账号。
+- 当前桌面端 UI 尚未接入本地产品 API，仍使用示例数据。
 - 当前 Tauri 原生壳还未完成初始化，现阶段使用 Vite 浏览器原型。
 - 当前附件预览使用示例数据。
 - “创建草稿”是产品交互演示，不会向 Mail.app 发送内容。

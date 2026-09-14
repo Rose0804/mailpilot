@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
-import type { AccountRef, MailMessage, MailboxRef } from "@mailpilot/domain";
+import type { AccountRef, MailMessage, MailboxRef, MessageRef } from "@mailpilot/domain";
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
@@ -127,6 +127,44 @@ export class MailDatabase {
     this.rebuildSearchIndex();
   }
 
+  listAccounts(): AccountRef[] {
+    const rows = this.db
+      .prepare("SELECT provider, id, email, display_name FROM accounts ORDER BY display_name")
+      .all() as Array<Record<string, unknown>>;
+    return rows.map((row) => toAccount(row));
+  }
+
+  listMailboxes(accountId: string): MailboxRef[] {
+    const rows = this.db
+      .prepare(`
+        SELECT m.account_id, m.id, m.name, m.unread_count,
+               a.provider, a.email, a.display_name
+        FROM mailboxes m
+        JOIN accounts a ON a.id = m.account_id
+        WHERE m.account_id = ?
+        ORDER BY m.name
+      `)
+      .all(accountId) as Array<Record<string, unknown>>;
+    return rows.map((row) => ({
+      account: toAccount(row),
+      mailboxId: String(row.id),
+      name: String(row.name),
+      unreadCount: Number(row.unread_count),
+    }));
+  }
+
+  getMessage(ref: MessageRef): MailMessage | null {
+    const row = this.db
+      .prepare(`
+        SELECT m.*, a.provider, a.email, a.display_name
+        FROM messages m
+        JOIN accounts a ON a.id = m.account_id
+        WHERE m.account_id = ? AND m.mailbox_id = ? AND m.message_id = ?
+      `)
+      .get(ref.account.accountId, ref.mailboxId, ref.messageId) as Record<string, unknown> | undefined;
+    return row ? toMailMessage(row) : null;
+  }
+
   searchMessages(input: MessageSearchInput): MailMessage[] {
     const clauses: string[] = [];
     const values: Array<string | number> = [];
@@ -195,12 +233,7 @@ function toFtsQuery(query: string): string {
 }
 
 function toMailMessage(row: Record<string, unknown>): MailMessage {
-  const account: AccountRef = {
-    accountId: String(row.account_id),
-    provider: String(row.provider) as AccountRef["provider"],
-    email: String(row.email),
-    displayName: String(row.display_name),
-  };
+  const account = toAccount(row);
   return {
     ref: {
       account,
@@ -214,5 +247,14 @@ function toMailMessage(row: Record<string, unknown>): MailMessage {
     preview: String(row.preview),
     body: row.body ? String(row.body) : undefined,
     isRead: Boolean(row.is_read),
+  };
+}
+
+function toAccount(row: Record<string, unknown>): AccountRef {
+  return {
+    accountId: String(row.id ?? row.account_id),
+    provider: String(row.provider) as AccountRef["provider"],
+    email: String(row.email),
+    displayName: String(row.display_name),
   };
 }

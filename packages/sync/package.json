@@ -11,7 +11,8 @@
   },
   "scripts": {
     "lint": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "sync": "tsx src/cli.ts"
   },
   "dependencies": {
     "@mailpilot/apple-mail-connector": "workspace:*",
@@ -19,6 +20,7 @@
     "@mailpilot/domain": "workspace:*"
   },
   "devDependencies": {
+    "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.9"
   }

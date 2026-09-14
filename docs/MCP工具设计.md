@@ -44,10 +44,20 @@ type SearchMessagesInput = {
 预览资源使用稳定的本地资源标识，不向 Agent 暴露任意文件系统路径：
 
 ```text
-mailpilot://message/<message-id>
-mailpilot://attachment/<attachment-id>/preview
-mailpilot://attachment/<attachment-id>/text
+mailpilot://message/<account-id>/<mailbox-id>/<message-id>
+mailpilot://attachment/<account-id>/<attachment-id>/preview
+mailpilot://attachment/<account-id>/<attachment-id>/text
 ```
+
+当前只读实现已提供：
+
+- `list_accounts`
+- `list_mailboxes`
+- `search_messages`
+- `get_message`
+- `mailpilot://message/{accountId}/{mailboxId}/{messageId}`
+
+MCP 返回的邮件正文和资源统一标记为不可信数据。资源 URI 是稳定标识，不返回 Mail.app 内部路径或本地附件绝对路径。
 
 ## 5. 写操作流程
 

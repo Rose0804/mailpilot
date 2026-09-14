@@ -23,6 +23,9 @@ describe("本地邮件数据库", () => {
     const rows = database.searchMessages({ accountIds: ["work"], query: "renewal" });
     expect(rows).toHaveLength(1);
     expect(rows[0].ref.account.email).toBe("siyuan@loomos.ai");
+    expect(database.listAccounts()[0].accountId).toBe("work");
+    expect(database.listMailboxes("work")[0].mailboxId).toBe("INBOX");
+    expect(database.getMessage(rows[0].ref)?.subject).toBe("Renewal terms");
     expect(
       database.searchMessages({
         dateFrom: "2026-09-15T00:00:00Z",

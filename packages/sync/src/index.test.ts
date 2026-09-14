@@ -34,4 +34,31 @@ describe("邮件同步服务", () => {
     expect(database.searchMessages({ query: "Renewal" })).toHaveLength(1);
     database.close();
   });
+
+  it("可以同步所有已发现账号", async () => {
+    const secondAccount: AccountRef = {
+      ...account,
+      accountId: "personal",
+      email: "personal@example.com",
+      displayName: "Personal",
+    };
+    const reader: MailReader = {
+      listAccounts: async () => [account, secondAccount],
+      listMailboxes: async (accountId) => [
+        {
+          account: accountId === "work" ? account : secondAccount,
+          mailboxId: "INBOX",
+          name: "INBOX",
+          unreadCount: 0,
+        },
+      ],
+      listMessages: async () => [],
+      getMessage: async () => null,
+    };
+    const database = new MailDatabase();
+    const results = await new MailSyncService(reader, database).syncAll();
+    expect(results.map((result) => result.accountId)).toEqual(["work", "personal"]);
+    expect(database.listAccounts()).toHaveLength(2);
+    database.close();
+  });
 });
