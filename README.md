@@ -12,7 +12,7 @@ MailPilot 是一个本地优先的 Agentic 邮箱工作台，帮助用户理解�
 
 ## 当前状态
 
-当前已完成桌面端邮箱工作台 MVP、Apple Mail 只读连接器、本地 SQLite/FTS5 索引、全量账号同步和只读 MCP Server。DSH 会话适配、附件索引和写操作仍在后续阶段接入。
+当前已完成桌面端邮箱工作台 MVP、Apple Mail 只读连接器、本地 SQLite/FTS5 索引、全量账号同步、只读 MCP Server 和 DSH 会话适配层。附件索引、桌面端真实 API 和写操作仍在后续阶段接入。
 
 ## 技术路线
 
