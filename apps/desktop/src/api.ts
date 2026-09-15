@@ -49,6 +49,74 @@ export type ApiMessageDetails = {
   attachments: ApiAttachment[];
 };
 
+export type ApiPlanningSource = {
+  accountId: string;
+  mailboxId: string;
+  messageId: string;
+  evidence: string;
+};
+
+export type ApiMailEvent = {
+  eventId: string;
+  kind: "meeting" | "deadline" | "travel" | "reminder" | "commitment";
+  title: string;
+  startAt?: string;
+  endAt?: string;
+  dueAt?: string;
+  timezone?: string;
+  location?: string;
+  description?: string;
+  attendees: string[];
+  confidence: number;
+  status: "proposed" | "confirmed" | "dismissed";
+  sources: ApiPlanningSource[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ApiOrchestrationTask = {
+  taskId: string;
+  title: string;
+  description?: string;
+  status: "planned" | "in_progress" | "blocked" | "done" | "dismissed";
+  priority: "low" | "normal" | "high" | "urgent";
+  dueAt?: string;
+  estimatedMinutes?: number;
+  sourceEventIds: string[];
+  sourceRefs: ApiPlanningSource[];
+  dependencyIds: string[];
+  accountIds: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ApiScheduleBlock = {
+  blockId: string;
+  sourceType: "event" | "task";
+  sourceId: string;
+  title: string;
+  startAt?: string;
+  endAt?: string;
+  dueAt?: string;
+  accountIds: string[];
+  status: string;
+  conflictIds: string[];
+};
+
+export type ApiScheduleConflict = {
+  conflictId: string;
+  blockIds: string[];
+  title: string;
+};
+
+export type ApiScheduleOverview = {
+  events: ApiMailEvent[];
+  tasks: ApiOrchestrationTask[];
+  blocks: ApiScheduleBlock[];
+  conflicts: ApiScheduleConflict[];
+  generatedAt: string;
+};
+
 export type ApiAgentEvent = {
   type:
     | "session.started"
@@ -110,6 +178,47 @@ export async function getMessage(
 
 export async function syncMail(): Promise<void> {
   await request<{ results: unknown[] }>("/api/sync", { method: "POST" });
+}
+
+export async function getPlanningOverview(input: {
+  accountIds?: string[];
+  dateFrom?: string;
+  dateTo?: string;
+} = {}): Promise<ApiScheduleOverview> {
+  const params = new URLSearchParams();
+  if (input.accountIds?.length) params.set("accountIds", input.accountIds.join(","));
+  if (input.dateFrom) params.set("dateFrom", input.dateFrom);
+  if (input.dateTo) params.set("dateTo", input.dateTo);
+  const query = params.toString();
+  return request<ApiScheduleOverview>(`/api/planning/overview${query ? `?${query}` : ""}`);
+}
+
+export async function getPlanningEvents(input: {
+  accountIds?: string[];
+  dateFrom?: string;
+  dateTo?: string;
+} = {}): Promise<ApiMailEvent[]> {
+  const params = new URLSearchParams();
+  if (input.accountIds?.length) params.set("accountIds", input.accountIds.join(","));
+  if (input.dateFrom) params.set("dateFrom", input.dateFrom);
+  if (input.dateTo) params.set("dateTo", input.dateTo);
+  const query = params.toString();
+  const response = await request<{ events: ApiMailEvent[] }>(`/api/planning/events${query ? `?${query}` : ""}`);
+  return response.events;
+}
+
+export async function getPlanningTasks(input: {
+  accountIds?: string[];
+  dateFrom?: string;
+  dateTo?: string;
+} = {}): Promise<ApiOrchestrationTask[]> {
+  const params = new URLSearchParams();
+  if (input.accountIds?.length) params.set("accountIds", input.accountIds.join(","));
+  if (input.dateFrom) params.set("dateFrom", input.dateFrom);
+  if (input.dateTo) params.set("dateTo", input.dateTo);
+  const query = params.toString();
+  const response = await request<{ tasks: ApiOrchestrationTask[] }>(`/api/planning/tasks${query ? `?${query}` : ""}`);
+  return response.tasks;
 }
 
 export async function createAgentSession(input: {

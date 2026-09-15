@@ -17,7 +17,13 @@ for (const account of accounts) {
   database.upsertAccount(account);
 }
 
-const server = createMailPilotMcpServer(createDatabaseQueryService(database));
+const scopedAccountIds = process.env.MAILPILOT_ACCOUNT_IDS
+  ?.split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+const server = createMailPilotMcpServer(createDatabaseQueryService(database), {
+  accountIds: scopedAccountIds,
+});
 const transport = new StdioServerTransport();
 
 const shutdown = async () => {

@@ -3,10 +3,14 @@ import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import type {
   AccountRef,
   Attachment,
+  MailEvent,
   MailMessage,
   MailboxRef,
   MessageRef,
+  OrchestrationTask,
+  ScheduleOverview,
 } from "@mailpilot/domain";
+import { buildScheduleOverview } from "@mailpilot/domain";
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
@@ -31,6 +35,12 @@ export type AttachmentSearchResult = {
   attachment: Attachment;
   chunkIndex?: number;
   matchedText?: string;
+};
+
+export type PlanningFilter = {
+  accountIds?: string[];
+  dateFrom?: string;
+  dateTo?: string;
 };
 
 export class MailDatabase {
@@ -100,6 +110,39 @@ export class MailDatabase {
         sender,
         preview,
         body
+      );
+      CREATE TABLE IF NOT EXISTS mail_events (
+        event_id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        title TEXT NOT NULL,
+        start_at TEXT,
+        end_at TEXT,
+        due_at TEXT,
+        timezone TEXT,
+        location TEXT,
+        description TEXT,
+        attendees_json TEXT NOT NULL,
+        confidence REAL NOT NULL,
+        status TEXT NOT NULL,
+        account_ids_json TEXT NOT NULL,
+        sources_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS orchestration_tasks (
+        task_id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT,
+        status TEXT NOT NULL,
+        priority TEXT NOT NULL,
+        due_at TEXT,
+        estimated_minutes INTEGER,
+        source_event_ids_json TEXT NOT NULL,
+        source_refs_json TEXT NOT NULL,
+        dependency_ids_json TEXT NOT NULL,
+        account_ids_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
       );
     `);
   }
@@ -372,6 +415,112 @@ export class MailDatabase {
     return rows.map((row) => toMailMessage(row));
   }
 
+  upsertMailEvent(event: MailEvent): void {
+    this.db
+      .prepare(`
+        INSERT INTO mail_events (
+          event_id, kind, title, start_at, end_at, due_at, timezone, location,
+          description, attendees_json, confidence, status, account_ids_json,
+          sources_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(event_id) DO UPDATE SET
+          kind = excluded.kind,
+          title = excluded.title,
+          start_at = excluded.start_at,
+          end_at = excluded.end_at,
+          due_at = excluded.due_at,
+          timezone = excluded.timezone,
+          location = excluded.location,
+          description = excluded.description,
+          attendees_json = excluded.attendees_json,
+          confidence = excluded.confidence,
+          status = excluded.status,
+          account_ids_json = excluded.account_ids_json,
+          sources_json = excluded.sources_json,
+          updated_at = excluded.updated_at
+      `)
+      .run(
+        event.eventId,
+        event.kind,
+        event.title,
+        event.startAt ?? null,
+        event.endAt ?? null,
+        event.dueAt ?? null,
+        event.timezone ?? null,
+        event.location ?? null,
+        event.description ?? null,
+        JSON.stringify(event.attendees),
+        event.confidence,
+        event.status,
+        JSON.stringify(unique(event.sources.map((source) => source.accountId))),
+        JSON.stringify(event.sources),
+        event.createdAt,
+        event.updatedAt,
+      );
+  }
+
+  listMailEvents(input: PlanningFilter = {}): MailEvent[] {
+    const rows = this.db
+      .prepare("SELECT * FROM mail_events ORDER BY COALESCE(start_at, due_at, created_at) ASC")
+      .all() as Array<Record<string, unknown>>;
+    return rows
+      .map(toMailEvent)
+      .filter((event) => planningFilterMatches(event, input));
+  }
+
+  upsertOrchestrationTask(task: OrchestrationTask): void {
+    this.db
+      .prepare(`
+        INSERT INTO orchestration_tasks (
+          task_id, title, description, status, priority, due_at, estimated_minutes,
+          source_event_ids_json, source_refs_json, dependency_ids_json,
+          account_ids_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(task_id) DO UPDATE SET
+          title = excluded.title,
+          description = excluded.description,
+          status = excluded.status,
+          priority = excluded.priority,
+          due_at = excluded.due_at,
+          estimated_minutes = excluded.estimated_minutes,
+          source_event_ids_json = excluded.source_event_ids_json,
+          source_refs_json = excluded.source_refs_json,
+          dependency_ids_json = excluded.dependency_ids_json,
+          account_ids_json = excluded.account_ids_json,
+          updated_at = excluded.updated_at
+      `)
+      .run(
+        task.taskId,
+        task.title,
+        task.description ?? null,
+        task.status,
+        task.priority,
+        task.dueAt ?? null,
+        task.estimatedMinutes ?? null,
+        JSON.stringify(task.sourceEventIds),
+        JSON.stringify(task.sourceRefs),
+        JSON.stringify(task.dependencyIds),
+        JSON.stringify(task.accountIds),
+        task.createdAt,
+        task.updatedAt,
+      );
+  }
+
+  listOrchestrationTasks(input: PlanningFilter = {}): OrchestrationTask[] {
+    const rows = this.db
+      .prepare("SELECT * FROM orchestration_tasks ORDER BY COALESCE(due_at, created_at) ASC")
+      .all() as Array<Record<string, unknown>>;
+    return rows
+      .map(toOrchestrationTask)
+      .filter((task) => planningFilterMatches(task, input));
+  }
+
+  getScheduleOverview(input: PlanningFilter = {}): ScheduleOverview {
+    const events = this.listMailEvents(input);
+    const tasks = this.listOrchestrationTasks(input);
+    return buildScheduleOverview(events, tasks);
+  }
+
   close(): void {
     this.db.close();
   }
@@ -452,4 +601,81 @@ function toAttachment(row: Record<string, unknown>): Attachment {
     previewPath: row.preview_path ? String(row.preview_path) : undefined,
     indexStatus: String(row.index_status) as Attachment["indexStatus"],
   };
+}
+
+function toMailEvent(row: Record<string, unknown>): MailEvent {
+  return {
+    eventId: String(row.event_id),
+    kind: String(row.kind) as MailEvent["kind"],
+    title: String(row.title),
+    startAt: optionalString(row.start_at),
+    endAt: optionalString(row.end_at),
+    dueAt: optionalString(row.due_at),
+    timezone: optionalString(row.timezone),
+    location: optionalString(row.location),
+    description: optionalString(row.description),
+    attendees: parseStringArray(row.attendees_json),
+    confidence: Number(row.confidence),
+    status: String(row.status) as MailEvent["status"],
+    sources: parseJson(row.sources_json, [] as MailEvent["sources"]),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function toOrchestrationTask(row: Record<string, unknown>): OrchestrationTask {
+  return {
+    taskId: String(row.task_id),
+    title: String(row.title),
+    description: optionalString(row.description),
+    status: String(row.status) as OrchestrationTask["status"],
+    priority: String(row.priority) as OrchestrationTask["priority"],
+    dueAt: optionalString(row.due_at),
+    estimatedMinutes: row.estimated_minutes === null ? undefined : Number(row.estimated_minutes),
+    sourceEventIds: parseStringArray(row.source_event_ids_json),
+    sourceRefs: parseJson(row.source_refs_json, [] as OrchestrationTask["sourceRefs"]),
+    dependencyIds: parseStringArray(row.dependency_ids_json),
+    accountIds: parseStringArray(row.account_ids_json),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function planningFilterMatches(
+  record: MailEvent | OrchestrationTask,
+  input: PlanningFilter,
+): boolean {
+  const accountIds =
+    "accountIds" in record
+      ? record.accountIds
+      : unique(record.sources.map((source) => source.accountId));
+  if (input.accountIds?.length && !accountIds.some((accountId) => input.accountIds!.includes(accountId))) {
+    return false;
+  }
+  const date = "sourceEventIds" in record ? record.dueAt : record.startAt ?? record.dueAt;
+  if (input.dateFrom && date && date < input.dateFrom) return false;
+  if (input.dateTo && date && date > input.dateTo) return false;
+  return true;
+}
+
+function parseStringArray(value: unknown): string[] {
+  const parsed = parseJson(value, [] as unknown[]);
+  return parsed.filter((item): item is string => typeof item === "string");
+}
+
+function parseJson<T>(value: unknown, fallback: T): T {
+  if (typeof value !== "string") return fallback;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function optionalString(value: unknown): string | undefined {
+  return value === null || value === undefined || value === "" ? undefined : String(value);
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
 }

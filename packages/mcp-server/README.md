@@ -13,3 +13,14 @@ Pi Agent Runtime 默认不通过 MCP 子进程调用本包，而是复用同一�
 - 稳定的 `mailpilot://message/...` 与 `mailpilot://attachment/...` 资源。
 
 所有查询结果都保留账号作用域；附件正文和解析文本会标记为不可信内容。
+
+当前结构化编排能力包括：
+
+- `record_mail_event`：保存带邮件原文证据和置信度的事件。
+- `create_task`：创建带来源、跨账号信息和依赖关系的任务。
+- `list_tasks`：按账号和日期范围读取任务。
+- `list_schedule`：按时间排序事件和任务并检测冲突。
+
+Pi 默认直接复用相同的查询服务和工具校验；DSH 与外部 Agent 通过 MCP 调用相同的能力。规划工具只负责事实、任务和排程数据，不会绕过审批去发送邮件或写入日历。
+
+独立 MCP 进程可以通过 `MAILPILOT_ACCOUNT_IDS=work,personal` 固定账号作用域。未设置时服务会暴露本地索引中的全部账号，调用方仍必须在每个来源和查询中保留账号标识。

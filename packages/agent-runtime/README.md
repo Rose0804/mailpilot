@@ -9,6 +9,7 @@
 - MailPilot MCP Server 负责标准 MCP 工具和稳定资源；Pi 默认直接复用同一查询服务生成原生工具。
 - MailPilot Policy 负责账号作用域、审批和审计，任何 Agent runtime 都不是安全边界。
 - UI 只订阅 MailPilot `AgentEvent`，不解析 Pi 或 DSH 的隐式思维链。
+- 时间表请求通过结构化工具完成：先搜索和读取，再 `record_mail_event`，然后 `create_task`，最后 `list_schedule`。
 
 ## 统一契约
 
@@ -53,3 +54,18 @@ Local API
 ```
 
 DSH 的 MCP 工具通过 profile patch 配置 `@deepseek-ai/dsh-mcp-client`，以 `mcp__mailpilot__<tool>` 形式出现在模型工具列表中。MailPilot 不把 `mcpServers` 伪装成 `initialize` 参数，也不把 DSH 当作审批边界；发送、删除和批量变更仍由 MailPilot Policy 拦截。
+
+## 结构化编排
+
+事件和任务不是 Agent 的隐式记忆：
+
+```text
+邮件 / 附件
+  -> search_messages / search_attachments
+  -> get_message / get_attachment_text
+  -> record_mail_event（来源 + 证据 + 置信度）
+  -> create_task（跨账号 + 依赖）
+  -> list_schedule（排序 + 冲突）
+```
+
+`MailEvent` 和 `OrchestrationTask` 写入 MailPilot 数据库，UI 只展示这些可审计结果。Agent 不展示隐式思维链，也不凭空补全邮件中没有确认的时间。

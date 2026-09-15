@@ -119,6 +119,10 @@ describe("MailPilot local API", () => {
     database.close();
   });
 
+  it("暴露结构化事件、任务和确定性排程", () => {
+    databaseWithPlanningData();
+  });
+
   it.skipIf(process.env.MAILPILOT_NETWORK_TEST !== "1")("通过 localhost HTTP 暴露健康检查和快照", async () => {
     const database = new MailDatabase();
     const api = new MailPilotLocalApi({
@@ -142,3 +146,53 @@ describe("MailPilot local API", () => {
     }
   });
 });
+
+function databaseWithPlanningData(): void {
+  const database = new MailDatabase();
+  database.upsertMessage({
+    ref: { account, mailboxId: "INBOX", messageId: "m-plan" },
+    sender: "Maya",
+    subject: "Review",
+    receivedAt: "2026-09-16T09:42:00Z",
+    preview: "Thursday 10 AM review",
+    body: "Thursday 10 AM review",
+    isRead: false,
+  });
+  database.upsertMailEvent({
+    eventId: "event-plan",
+    kind: "meeting",
+    title: "Review",
+    startAt: "2026-09-17T10:00:00Z",
+    endAt: "2026-09-17T11:00:00Z",
+    attendees: [],
+    confidence: 0.9,
+    status: "confirmed",
+    sources: [{ accountId: "work", mailboxId: "INBOX", messageId: "m-plan", evidence: "Thursday 10 AM review" }],
+    createdAt: "2026-09-16T01:00:00Z",
+    updatedAt: "2026-09-16T01:00:00Z",
+  });
+  database.upsertOrchestrationTask({
+    taskId: "task-plan",
+    title: "Prepare",
+    status: "planned",
+    priority: "high",
+    dueAt: "2026-09-17T10:30:00Z",
+    estimatedMinutes: 60,
+    sourceEventIds: ["event-plan"],
+    sourceRefs: [],
+    dependencyIds: [],
+    accountIds: ["work"],
+    createdAt: "2026-09-16T01:00:00Z",
+    updatedAt: "2026-09-16T01:00:00Z",
+  });
+  const api = new MailPilotLocalApi({
+    database,
+    reader: {} as MailReader,
+    sync: {} as MailSyncService,
+  });
+  const overview = api.getPlanningOverview({ accountIds: ["work"] });
+  expect(overview.events[0].eventId).toBe("event-plan");
+  expect(overview.tasks[0].taskId).toBe("task-plan");
+  expect(overview.conflicts).toHaveLength(1);
+  database.close();
+}

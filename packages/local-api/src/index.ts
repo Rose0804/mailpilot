@@ -4,7 +4,16 @@ import { URL } from "node:url";
 import type { AgentRuntime, AgentSession, AgentEvent } from "@mailpilot/agent-runtime";
 import type { MailReader } from "@mailpilot/apple-mail-connector";
 import type { MailDatabase } from "@mailpilot/database";
-import type { AccountRef, Attachment, MailMessage, MessageRef } from "@mailpilot/domain";
+import type {
+  AccountRef,
+  Attachment,
+  MailEvent,
+  MailMessage,
+  MessageRef,
+  OrchestrationTask,
+  ScheduleOverview,
+} from "@mailpilot/domain";
+import type { PlanningFilter } from "@mailpilot/database";
 import type { MailSyncService } from "@mailpilot/sync";
 
 export type LocalApiOptions = {
@@ -25,6 +34,8 @@ export type MailSnapshot = {
   messages: Array<ReturnType<typeof serializeMessage>>;
   generatedAt: string;
 };
+
+export type PlanningOverview = ScheduleOverview;
 
 export class MailPilotLocalApi {
   constructor(private readonly options: LocalApiOptions) {}
@@ -74,6 +85,18 @@ export class MailPilotLocalApi {
 
   syncAll() {
     return this.options.sync.syncAll();
+  }
+
+  getPlanningOverview(input: PlanningFilter = {}): PlanningOverview {
+    return this.options.database.getScheduleOverview(input);
+  }
+
+  getPlanningEvents(input: PlanningFilter = {}): MailEvent[] {
+    return this.options.database.listMailEvents(input);
+  }
+
+  getPlanningTasks(input: PlanningFilter = {}): OrchestrationTask[] {
+    return this.options.database.listOrchestrationTasks(input);
   }
 
   async createAgentSession(input: { title?: string; accountIds?: string[] }): Promise<AgentSession> {
@@ -169,6 +192,18 @@ async function handleRequest(
   }
   if (request.method === "POST" && url.pathname === "/api/sync") {
     sendJson(response, 200, { results: await api.syncAll() });
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/api/planning/overview") {
+    sendJson(response, 200, api.getPlanningOverview(parsePlanningFilter(url)));
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/api/planning/events") {
+    sendJson(response, 200, { events: api.getPlanningEvents(parsePlanningFilter(url)) });
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/api/planning/tasks") {
+    sendJson(response, 200, { tasks: api.getPlanningTasks(parsePlanningFilter(url)) });
     return;
   }
   if (request.method === "GET" && parts.length === 5 && parts[0] === "api" && parts[1] === "messages") {
@@ -335,4 +370,19 @@ function decodeSegment(value: string): string {
   } catch {
     throw new Error("路径参数不是有效的 URL 编码");
   }
+}
+
+function parsePlanningFilter(url: URL): PlanningFilter {
+  const accountIds = url.searchParams
+    .getAll("accountIds")
+    .flatMap((value) => value.split(","))
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return {
+    ...(accountIds.length ? { accountIds: [...new Set(accountIds)] } : {}),
+    ...(url.searchParams.get("dateFrom")?.trim()
+      ? { dateFrom: url.searchParams.get("dateFrom")!.trim() }
+      : {}),
+    ...(url.searchParams.get("dateTo")?.trim() ? { dateTo: url.searchParams.get("dateTo")!.trim() } : {}),
+  };
 }

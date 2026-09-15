@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Archive,
+  AlertTriangle,
   ArrowUpRight,
+  CalendarClock,
   ChevronDown,
   FileText,
+  GitBranch,
   Inbox,
+  ListTodo,
   MoreHorizontal,
   Paperclip,
   Plus,
@@ -30,12 +34,14 @@ import {
   abortAgent,
   createAgentSession,
   getMessage,
+  getPlanningOverview,
   getSnapshot,
   sendAgentMessage,
   syncMail,
   type ApiAgentEvent,
   type ApiAgentSession,
   type ApiAttachment,
+  type ApiScheduleOverview,
 } from "./api";
 
 const toneClass = {
@@ -108,8 +114,10 @@ function App() {
   const [agentEvents, setAgentEvents] = useState<ApiAgentEvent[]>([]);
   const [agentBusy, setAgentBusy] = useState(false);
   const [agentSession, setAgentSession] = useState<ApiAgentSession | null>(null);
+  const [planningOverview, setPlanningOverview] = useState<ApiScheduleOverview | null>(null);
 
   useEffect(() => {
+    if (apiState === "checking") return;
     let active = true;
     void getSnapshot(query)
       .then((snapshot) => {
@@ -196,6 +204,20 @@ function App() {
     };
   }, [apiState, mailMessages, selectedId]);
 
+  useEffect(() => {
+    let active = true;
+    void getPlanningOverview(activeAccount === "all" ? {} : { accountIds: [activeAccount] })
+      .then((overview) => {
+        if (active) setPlanningOverview(overview);
+      })
+      .catch(() => {
+        if (active) setPlanningOverview(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeAccount, apiState]);
+
   const visibleMessages = useMemo(
     () =>
       mailMessages.filter((message) => {
@@ -244,6 +266,13 @@ function App() {
             ? `${snapshot.messages[0].accountId}|${snapshot.messages[0].mailboxId}|${snapshot.messages[0].messageId}`
             : "",
       );
+      try {
+        setPlanningOverview(
+          await getPlanningOverview(activeAccount === "all" ? {} : { accountIds: [activeAccount] }),
+        );
+      } catch {
+        setPlanningOverview(null);
+      }
     } catch {
       setApiState("sync-error");
     } finally {
@@ -260,8 +289,18 @@ function App() {
         accountIds: activeAccount === "all" ? undefined : [activeAccount],
       });
       setAgentSession(session);
-      const events = await sendAgentMessage(session.sessionId, "请先搜索当前范围内最需要处理的邮件，并说明依据。");
+      const events = await sendAgentMessage(
+        session.sessionId,
+        "请跨当前范围内的邮箱搜索会议、截止日期、出行和待跟进事项；为每个事实记录来源邮件与原文证据，创建必要的任务和依赖关系，最后生成时间表并标记冲突。",
+      );
       setAgentEvents(events);
+      try {
+        setPlanningOverview(
+          await getPlanningOverview(activeAccount === "all" ? {} : { accountIds: [activeAccount] }),
+        );
+      } catch {
+        setPlanningOverview(null);
+      }
     } catch (error) {
       setAgentEvents([
         {
@@ -386,11 +425,82 @@ function App() {
           </div>
           <button className="agent-prompt" type="button" onClick={() => void askAgent()} disabled={agentBusy}>
             <span className="agent-prompt-icon">
-              <Sparkles size={17} />
+              <CalendarClock size={17} />
             </span>
-            <span>{agentBusy ? "MailPilot is reading the index..." : "Ask MailPilot to triage this inbox"}</span>
+            <span>{agentBusy ? "MailPilot is building your schedule..." : "Ask MailPilot to build a schedule"}</span>
             <kbd>Enter</kbd>
           </button>
+          <section className="planning-strip" aria-label="时间表">
+            <div className="planning-strip-heading">
+              <div>
+                <p className="eyebrow">NEXT UP</p>
+                <h2>时间表</h2>
+              </div>
+              <div className="planning-summary">
+                <span>
+                  <CalendarClock size={13} />
+                  {planningOverview?.events.length ?? 0} events
+                </span>
+                <span>
+                  <ListTodo size={13} />
+                  {planningOverview?.tasks.length ?? 0} tasks
+                </span>
+                <span className={planningOverview?.conflicts.length ? "planning-alert" : ""}>
+                  <AlertTriangle size={13} />
+                  {planningOverview?.conflicts.length ?? 0} conflicts
+                </span>
+              </div>
+            </div>
+            {planningOverview?.blocks.length ? (
+              <div className="planning-block-list">
+                {planningOverview.blocks.slice(0, 5).map((block) => {
+                  const task = planningOverview.tasks.find((item) => item.taskId === block.sourceId);
+                  const event = planningOverview.events.find((item) => item.eventId === block.sourceId);
+                  return (
+                    <div className="planning-block" key={block.blockId}>
+                      <span className="planning-time">{formatScheduleTime(block.startAt ?? block.dueAt)}</span>
+                      <span className="planning-block-icon">
+                        {block.conflictIds.length ? (
+                          <AlertTriangle size={15} />
+                        ) : block.sourceType === "task" ? (
+                          <ListTodo size={15} />
+                        ) : (
+                          <CalendarClock size={15} />
+                        )}
+                      </span>
+                      <span className="planning-block-copy">
+                        <strong>{block.title}</strong>
+                        <small>
+                          {block.sourceType === "task" ? "Task" : "Event"} ·{" "}
+                          {block.accountIds.join(", ") || "来源待确认"}
+                          {task?.dependencyIds.length ? ` · ${task.dependencyIds.length} dependencies` : ""}
+                          {event ? ` · ${Math.round(event.confidence * 100)}% confidence` : ""}
+                          {event?.sources[0]?.evidence ? ` · "${event.sources[0].evidence}"` : ""}
+                        </small>
+                      </span>
+                      {block.conflictIds.length > 0 && <span className="planning-conflict-tag">Conflict</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="planning-empty">
+                <CalendarClock size={16} />
+                <span>还没有结构化事件。让 MailPilot 先阅读当前范围内的邮箱。</span>
+              </div>
+            )}
+            {planningOverview?.conflicts.length ? (
+              <div className="planning-conflicts">
+                <AlertTriangle size={15} />
+                <span>
+                  {planningOverview.conflicts
+                    .slice(0, 2)
+                    .map((conflict) => conflict.title)
+                    .join("；")}
+                </span>
+              </div>
+            ) : null}
+          </section>
           <p className="eyebrow list-eyebrow">TODAY</p>
           <div className="mail-list">
             {visibleMessages.length === 0 ? (
@@ -506,6 +616,30 @@ function App() {
           ) : (
             <div className="empty-inspector-state">No Agent analysis yet.</div>
           )}
+          <p className="eyebrow section-gap">TASK GRAPH</p>
+          {planningOverview?.tasks.length ? (
+            <div className="task-graph">
+              {planningOverview.tasks.slice(0, 3).map((task) => (
+                <div className="task-graph-row" key={task.taskId}>
+                  <GitBranch size={14} />
+                  <span>
+                    <strong>{task.title}</strong>
+                    <small>
+                      {task.accountIds.join(", ") || "No account"} ·{" "}
+                      {task.dependencyIds.length
+                        ? `${task.dependencyIds.length} dependencies`
+                        : "No dependencies"}
+                    </small>
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="empty-inspector-state">
+              <GitBranch size={15} />
+              No orchestration tasks yet.
+            </div>
+          )}
           {hasInspectorContext && (
             <div className="suggested-card">
               <p className="eyebrow">SUGGESTED ACTION</p>
@@ -586,4 +720,16 @@ function formatBytes(value: number): string {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatScheduleTime(value?: string): string {
+  if (!value) return "No time";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }

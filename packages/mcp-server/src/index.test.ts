@@ -99,6 +99,9 @@ describe("MailPilot MCP facade", () => {
 
     expect(toolList.result.tools.map((tool) => tool.name)).toContain("search_messages");
     expect(toolList.result.tools.map((tool) => tool.name)).toContain("get_attachment_text");
+    expect(toolList.result.tools.map((tool) => tool.name)).toContain("record_mail_event");
+    expect(toolList.result.tools.map((tool) => tool.name)).toContain("create_task");
+    expect(toolList.result.tools.map((tool) => tool.name)).toContain("list_schedule");
     expect(searchResult[0].ref.messageId).toBe("m-1");
 
     await clientTransport.close();
@@ -156,6 +159,121 @@ describe("MailPilot MCP facade", () => {
     });
     expect(textContent(textResult)).toContain("UNTRUSTED_ATTACHMENT_TEXT");
     expect(textContent(textResult)).toContain("Net 45");
+    database.close();
+  });
+
+  it("从邮件证据创建事件、跨账号任务并拒绝越权和循环依赖", async () => {
+    const database = new MailDatabase();
+    database.upsertMessage({
+      ref: { account, mailboxId: "INBOX", messageId: "m-work-plan" },
+      sender: "Maya <maya@northstar.co>",
+      subject: "Customer review",
+      receivedAt: "2026-09-16T09:42:00Z",
+      preview: "Thursday 10 AM review. Please prepare the deck.",
+      body: "Thursday 10 AM review. Please prepare the deck.",
+      isRead: false,
+    });
+    database.upsertMessage({
+      ref: { account: personalAccount, mailboxId: "INBOX", messageId: "m-personal-travel" },
+      sender: "Airline",
+      subject: "Travel booking",
+      receivedAt: "2026-09-16T10:00:00Z",
+      preview: "Check in by Friday at 5 PM.",
+      body: "Check in by Friday at 5 PM.",
+      isRead: false,
+    });
+
+    const tools = createMailPilotAgentTools(
+      createDatabaseQueryService(database),
+      ["work", "personal"],
+    );
+    const record = tools.find((tool) => tool.name === "record_mail_event");
+    const createTask = tools.find((tool) => tool.name === "create_task");
+    const listSchedule = tools.find((tool) => tool.name === "list_schedule");
+    if (!record || !createTask || !listSchedule) throw new Error("规划工具未注册");
+
+    const eventResult = await record.execute("call-event", {
+      eventId: "event-review",
+      kind: "meeting",
+      title: "Customer review",
+      startAt: "2026-09-17T10:00:00Z",
+      endAt: "2026-09-17T11:00:00Z",
+      confidence: 0.94,
+      sources: [
+        {
+          accountId: "work",
+          mailboxId: "INBOX",
+          messageId: "m-work-plan",
+          evidence: "Thursday 10 AM review",
+        },
+      ],
+    });
+    expect(textContent(eventResult)).toContain("event-review");
+
+    const firstTask = await createTask.execute("call-task-a", {
+      taskId: "task-prepare",
+      title: "Prepare the deck",
+      dueAt: "2026-09-17T10:30:00Z",
+      estimatedMinutes: 60,
+      sourceEventIds: ["event-review"],
+      accountIds: ["work"],
+    });
+    expect(textContent(firstTask)).toContain("task-prepare");
+
+    const crossAccountTask = await createTask.execute("call-task-b", {
+      taskId: "task-check-in",
+      title: "Check in for the trip",
+      dueAt: "2026-09-18T17:00:00Z",
+      dependencyIds: ["task-prepare"],
+      sourceEventIds: ["event-review"],
+      sourceRefs: [
+        {
+          accountId: "personal",
+          mailboxId: "INBOX",
+          messageId: "m-personal-travel",
+          evidence: "Check in by Friday at 5 PM",
+        },
+      ],
+    });
+    expect(textContent(crossAccountTask)).toContain("personal");
+
+    const scheduleResult = await listSchedule.execute("call-schedule", {});
+    const schedule = JSON.parse(textContent(scheduleResult)) as {
+      conflicts: Array<{ title: string }>;
+      tasks: Array<{ taskId: string; accountIds: string[] }>;
+    };
+    expect(schedule.conflicts).toHaveLength(1);
+    expect(schedule.tasks.find((task) => task.taskId === "task-check-in")?.accountIds).toEqual([
+      "work",
+      "personal",
+    ]);
+
+    await expect(
+      createTask.execute("call-cycle", {
+        taskId: "task-prepare",
+        title: "Prepare the deck again",
+        dependencyIds: ["task-check-in"],
+      }),
+    ).rejects.toThrow("循环");
+
+    const workOnlyTools = createMailPilotAgentTools(createDatabaseQueryService(database), ["work"]);
+    const workOnlyRecord = workOnlyTools.find((tool) => tool.name === "record_mail_event");
+    if (!workOnlyRecord) throw new Error("受限规划工具未注册");
+    await expect(
+      workOnlyRecord.execute("call-out-of-scope", {
+        kind: "reminder",
+        title: "Personal reminder",
+        confidence: 0.8,
+        sources: [
+          {
+            accountId: "personal",
+            mailboxId: "INBOX",
+            messageId: "m-personal-travel",
+            evidence: "Check in by Friday at 5 PM",
+          },
+        ],
+      }),
+    ).rejects.toThrow("账号");
     database.close();
   });
 });

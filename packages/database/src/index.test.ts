@@ -56,6 +56,37 @@ describe("本地邮件数据库", () => {
         query: "renewal",
       }),
     ).toHaveLength(0);
+
+    database.upsertMailEvent({
+      eventId: "event-1",
+      kind: "meeting",
+      title: "客户评审",
+      startAt: "2026-09-17T10:00:00Z",
+      endAt: "2026-09-17T11:00:00Z",
+      attendees: ["Maya"],
+      confidence: 0.9,
+      status: "proposed",
+      sources: [{ accountId: "work", mailboxId: "INBOX", messageId: "m-1", evidence: "Thursday 10 AM" }],
+      createdAt: "2026-09-15T01:00:00Z",
+      updatedAt: "2026-09-15T01:00:00Z",
+    });
+    database.upsertOrchestrationTask({
+      taskId: "task-1",
+      title: "准备评审材料",
+      status: "planned",
+      priority: "high",
+      dueAt: "2026-09-17T10:30:00Z",
+      estimatedMinutes: 60,
+      sourceEventIds: ["event-1"],
+      sourceRefs: [{ accountId: "work", mailboxId: "INBOX", messageId: "m-1", evidence: "prepare materials" }],
+      dependencyIds: [],
+      accountIds: ["work"],
+      createdAt: "2026-09-15T01:00:00Z",
+      updatedAt: "2026-09-15T01:00:00Z",
+    });
+    expect(database.listMailEvents({ accountIds: ["work"] })[0].title).toBe("客户评审");
+    expect(database.listOrchestrationTasks({ accountIds: ["work"] })[0].taskId).toBe("task-1");
+    expect(database.getScheduleOverview({ accountIds: ["work"] }).conflicts).toHaveLength(1);
     database.close();
   });
 });
