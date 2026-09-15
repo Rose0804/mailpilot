@@ -52,14 +52,21 @@ export type ApiMessageDetails = {
 export type ApiAgentEvent = {
   type:
     | "session.started"
+    | "session.updated"
+    | "turn.started"
     | "assistant.delta"
     | "assistant.message"
     | "tool.call"
     | "tool.result"
     | "approval.required"
+    | "turn.completed"
+    | "turn.failed"
     | "run.completed"
-    | "run.failed";
+    | "run.failed"
+    | "session.aborted";
+  session?: ApiAgentSession;
   sessionId?: string;
+  turnId?: string;
   text?: string;
   tool?: string;
   inputSummary?: string;
@@ -68,6 +75,17 @@ export type ApiAgentEvent = {
   approvalId?: string;
   summary?: string;
   message?: string;
+};
+
+export type ApiAgentSession = {
+  sessionId: string;
+  createdAt: string;
+  updatedAt: string;
+  title?: string;
+  accountIds?: string[];
+  runtime: "pi" | "dsh";
+  status: "idle" | "running" | "waiting_approval" | "aborted" | "closed";
+  turnCount: number;
 };
 
 const apiBaseUrl = (import.meta.env.VITE_MAILPILOT_API_URL ?? "http://127.0.0.1:3100").replace(/\/$/, "");
@@ -97,8 +115,8 @@ export async function syncMail(): Promise<void> {
 export async function createAgentSession(input: {
   title?: string;
   accountIds?: string[];
-}): Promise<{ sessionId: string }> {
-  const response = await request<{ session: { sessionId: string } }>("/api/agent/sessions", {
+}): Promise<ApiAgentSession> {
+  const response = await request<{ session: ApiAgentSession }>("/api/agent/sessions", {
     method: "POST",
     body: JSON.stringify(input),
   });
@@ -114,6 +132,40 @@ export async function sendAgentMessage(sessionId: string, text: string): Promise
     },
   );
   return response.events;
+}
+
+export async function getAgentSession(sessionId: string): Promise<ApiAgentSession> {
+  const response = await request<{ session: ApiAgentSession }>(
+    `/api/agent/sessions/${encodeURIComponent(sessionId)}`,
+  );
+  return response.session;
+}
+
+export async function getAgentEvents(sessionId: string): Promise<ApiAgentEvent[]> {
+  const response = await request<{ events: ApiAgentEvent[] }>(
+    `/api/agent/sessions/${encodeURIComponent(sessionId)}/events`,
+  );
+  return response.events;
+}
+
+export async function steerAgent(sessionId: string, text: string): Promise<void> {
+  await request(`/api/agent/sessions/${encodeURIComponent(sessionId)}/steer`, {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
+}
+
+export async function followUpAgent(sessionId: string, text: string): Promise<void> {
+  await request(`/api/agent/sessions/${encodeURIComponent(sessionId)}/follow-up`, {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
+}
+
+export async function abortAgent(sessionId: string): Promise<void> {
+  await request(`/api/agent/sessions/${encodeURIComponent(sessionId)}/abort`, {
+    method: "POST",
+  });
 }
 
 export async function respondToApproval(

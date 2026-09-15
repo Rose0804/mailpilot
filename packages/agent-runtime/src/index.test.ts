@@ -2,9 +2,14 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { Agent } from "@earendil-works/pi-agent-core";
+import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import {
+  type AgentEvent,
   DshRuntimeAdapter,
   JsonLineDshTransport,
+  PiAgentRuntime,
+  FileSessionStore,
   type DshEvent,
   type DshTransport,
 } from "./index.js";
@@ -42,7 +47,16 @@ describe("DSH Agent Runtime 适配层", () => {
       // Consume the stream to drive the adapter.
     }
 
-    expect(events).toEqual(["tool.call", "tool.result", "assistant.message", "run.completed"]);
+    expect(events).toEqual([
+      "session.updated",
+      "turn.started",
+      "tool.call",
+      "tool.result",
+      "assistant.message",
+      "turn.completed",
+      "run.completed",
+      "session.updated",
+    ]);
     await runtime.respondToApproval(session.sessionId, "approval-1", true);
     await runtime.closeSession(session.sessionId);
     await runtime.close();
@@ -109,7 +123,124 @@ input.on("line", (line) => {
     })) {
       events.push(event.type);
     }
-    expect(events).toEqual(["assistant.message", "run.completed"]);
+    expect(events).toEqual(["turn.started", "assistant.message", "turn.completed", "run.completed"]);
     await runtime.closeSession(session.sessionId);
   });
+
+  it("通过真实 Pi Agent 映射文本增量、消息和运行完成事件", async () => {
+    const runtime = new PiAgentRuntime({
+      agentFactory: () =>
+        new Agent({
+          initialState: {
+            model: fakeModel(),
+          },
+          streamFn: async () => {
+            const stream = createAssistantMessageEventStream();
+            queueMicrotask(() => {
+              const message = assistantMessage("已找到 1 封邮件。");
+              stream.push({ type: "start", partial: { ...message, content: [] } });
+              stream.push({
+                type: "text_start",
+                contentIndex: 0,
+                partial: { ...message, content: [{ type: "text", text: "" }] },
+              });
+              stream.push({
+                type: "text_delta",
+                contentIndex: 0,
+                delta: "已找到 1 封邮件。",
+                partial: message,
+              });
+              stream.push({ type: "text_end", contentIndex: 0, content: "已找到 1 封邮件。", partial: message });
+              stream.push({ type: "done", reason: "stop", message });
+            });
+            return stream;
+          },
+        }),
+    });
+    const session = await runtime.createSession({ sessionId: "pi-session" });
+    const events: AgentEvent[] = [];
+    for await (const event of runtime.streamMessage({ sessionId: session.sessionId, text: "找邮件" })) {
+      events.push(event);
+    }
+
+    expect(events.map((event) => event.type)).toEqual([
+      "turn.started",
+      "assistant.delta",
+      "assistant.message",
+      "turn.completed",
+      "run.completed",
+    ]);
+    expect(events.find((event) => event.type === "assistant.message")).toMatchObject({
+      text: "已找到 1 封邮件。",
+    });
+    await runtime.close();
+  });
+
+  it("把产品 Session 和可审计事件写入文件存储", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mailpilot-session-"));
+    const store = new FileSessionStore(root);
+    const runtime = new PiAgentRuntime({
+      sessionStore: store,
+      agentFactory: () =>
+        new Agent({
+          initialState: { model: fakeModel() },
+          streamFn: async () => {
+            const stream = createAssistantMessageEventStream();
+            queueMicrotask(() => {
+              const message = assistantMessage("已读取本地索引。");
+              stream.push({ type: "start", partial: { ...message, content: [] } });
+              stream.push({ type: "text_start", contentIndex: 0, partial: { ...message, content: [] } });
+              stream.push({ type: "text_delta", contentIndex: 0, delta: message.content[0].text, partial: message });
+              stream.push({ type: "text_end", contentIndex: 0, content: message.content[0].text, partial: message });
+              stream.push({ type: "done", reason: "stop", message });
+            });
+            return stream;
+          },
+        }),
+    });
+
+    const session = await runtime.createSession({ sessionId: "persistent-session" });
+    for await (const _event of runtime.streamMessage({ sessionId: session.sessionId, text: "读取索引" })) {
+      // Consume the stream to persist the complete event history.
+    }
+
+    expect(await store.get(session.sessionId)).toMatchObject({ status: "idle", turnCount: 1 });
+    expect((await store.listEvents(session.sessionId)).map((event) => event.type)).toContain("run.completed");
+    await runtime.close();
+  });
 });
+
+function fakeModel() {
+  return {
+    id: "deepseek-v4-flash",
+    name: "DeepSeek V4 Flash",
+    api: "openai-completions",
+    provider: "deepseek",
+    baseUrl: "https://api.deepseek.com",
+    reasoning: true,
+    input: ["text"] as ("text" | "image")[],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 100000,
+    maxTokens: 1000,
+  };
+}
+
+function assistantMessage(text: string) {
+  return {
+    role: "assistant" as const,
+    content: [{ type: "text" as const, text }],
+    api: "openai-completions" as const,
+    provider: "deepseek",
+    model: "deepseek-v4-flash",
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: "stop" as const,
+    timestamp: Date.now(),
+  };
+}

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { MailDatabase } from "@mailpilot/database";
 import type { MailReader } from "@mailpilot/apple-mail-connector";
-import type { AgentEvent, AgentRuntime } from "@mailpilot/agent-runtime";
+import { SessionEventBridge, type AgentEvent, type AgentRuntime } from "@mailpilot/agent-runtime";
 import type { AccountRef } from "@mailpilot/domain";
 import type { MailSyncService } from "@mailpilot/sync";
 import { createLocalApiServer, MailPilotLocalApi } from "./index.js";
@@ -85,12 +85,26 @@ describe("MailPilot local API", () => {
   it("通过 Runtime 返回 Agent 会话事件", async () => {
     const database = new MailDatabase();
     const runtime: AgentRuntime = {
-      createSession: async () => ({ sessionId: "s-1", createdAt: "2026-09-14T12:00:00Z" }),
+      runtimeName: "pi",
+      events: new SessionEventBridge(),
+      createSession: async () => ({
+        sessionId: "s-1",
+        createdAt: "2026-09-14T12:00:00Z",
+        updatedAt: "2026-09-14T12:00:00Z",
+        runtime: "pi",
+        status: "idle",
+        turnCount: 0,
+      }),
       async *streamMessage(): AsyncIterable<AgentEvent> {
         yield { type: "assistant.message", sessionId: "s-1", text: "找到 1 封邮件。" };
         yield { type: "run.completed", sessionId: "s-1" };
       },
+      steer: async () => undefined,
+      followUp: async () => undefined,
+      abort: async () => undefined,
       respondToApproval: async () => undefined,
+      getSession: async () => null,
+      listEvents: async () => [],
       closeSession: async () => undefined,
       close: async () => undefined,
     };

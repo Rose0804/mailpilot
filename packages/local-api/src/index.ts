@@ -77,12 +77,12 @@ export class MailPilotLocalApi {
   }
 
   async createAgentSession(input: { title?: string; accountIds?: string[] }): Promise<AgentSession> {
-    if (!this.options.runtime) throw new Error("DSH_RUNTIME_UNAVAILABLE");
+    if (!this.options.runtime) throw new Error("AGENT_RUNTIME_UNAVAILABLE");
     return this.options.runtime.createSession(input);
   }
 
   async sendAgentMessage(sessionId: string, text: string): Promise<AgentEvent[]> {
-    if (!this.options.runtime) throw new Error("DSH_RUNTIME_UNAVAILABLE");
+    if (!this.options.runtime) throw new Error("AGENT_RUNTIME_UNAVAILABLE");
     const events: AgentEvent[] = [];
     for await (const event of this.options.runtime.streamMessage({ sessionId, text })) {
       events.push(event);
@@ -91,8 +91,37 @@ export class MailPilotLocalApi {
   }
 
   async respondToApproval(sessionId: string, approvalId: string, approved: boolean): Promise<void> {
-    if (!this.options.runtime) throw new Error("DSH_RUNTIME_UNAVAILABLE");
+    if (!this.options.runtime) throw new Error("AGENT_RUNTIME_UNAVAILABLE");
     await this.options.runtime.respondToApproval(sessionId, approvalId, approved);
+  }
+
+  async getAgentSession(sessionId: string): Promise<AgentSession | null> {
+    if (!this.options.runtime) throw new Error("AGENT_RUNTIME_UNAVAILABLE");
+    return this.options.runtime.getSession(sessionId);
+  }
+
+  async listAgentEvents(sessionId: string): Promise<AgentEvent[]> {
+    if (!this.options.runtime) throw new Error("AGENT_RUNTIME_UNAVAILABLE");
+    return this.options.runtime.listEvents(sessionId);
+  }
+
+  async steerAgent(sessionId: string, text: string): Promise<void> {
+    if (!this.options.runtime) throw new Error("AGENT_RUNTIME_UNAVAILABLE");
+    await this.options.runtime.steer(sessionId, text);
+  }
+
+  async followUpAgent(sessionId: string, text: string): Promise<void> {
+    if (!this.options.runtime) throw new Error("AGENT_RUNTIME_UNAVAILABLE");
+    await this.options.runtime.followUp(sessionId, text);
+  }
+
+  async abortAgent(sessionId: string): Promise<void> {
+    if (!this.options.runtime) throw new Error("AGENT_RUNTIME_UNAVAILABLE");
+    await this.options.runtime.abort(sessionId);
+  }
+
+  getAgentRuntimeName(): string {
+    return this.options.runtime?.runtimeName ?? "none";
   }
 }
 
@@ -100,7 +129,7 @@ export function createLocalApiServer(api: MailPilotLocalApi, port = 3100): Serve
   return createServer(async (request, response) => {
     await handleRequest(api, request, response).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : "本地 API 请求失败";
-      const status = message === "DSH_RUNTIME_UNAVAILABLE" ? 503 : 400;
+      const status = message === "AGENT_RUNTIME_UNAVAILABLE" ? 503 : 400;
       sendJson(response, status, { error: message });
     });
   }).listen(port, "127.0.0.1");
@@ -182,6 +211,29 @@ async function handleRequest(
     return;
   }
   if (
+    request.method === "GET" &&
+    parts.length === 4 &&
+    parts[0] === "api" &&
+    parts[1] === "agent" &&
+    parts[2] === "sessions"
+  ) {
+    const sessionId = decodeSegment(parts[3]);
+    const session = await api.getAgentSession(sessionId);
+    sendJson(response, session ? 200 : 404, session ? { session } : { error: "AGENT_SESSION_NOT_FOUND" });
+    return;
+  }
+  if (
+    request.method === "GET" &&
+    parts.length === 5 &&
+    parts[0] === "api" &&
+    parts[1] === "agent" &&
+    parts[2] === "sessions" &&
+    parts[4] === "events"
+  ) {
+    sendJson(response, 200, { events: await api.listAgentEvents(decodeSegment(parts[3])) });
+    return;
+  }
+  if (
     request.method === "POST" &&
     parts.length === 5 &&
     parts[0] === "api" &&
@@ -191,6 +243,35 @@ async function handleRequest(
   ) {
     const body = await readJson(request);
     sendJson(response, 200, { events: await api.sendAgentMessage(decodeSegment(parts[3]), String(body.text ?? "")) });
+    return;
+  }
+  if (
+    request.method === "POST" &&
+    parts.length === 5 &&
+    parts[0] === "api" &&
+    parts[1] === "agent" &&
+    parts[2] === "sessions" &&
+    (parts[4] === "steer" || parts[4] === "follow-up")
+  ) {
+    const body = await readJson(request);
+    const sessionId = decodeSegment(parts[3]);
+    const text = String(body.text ?? "");
+    if (!text.trim()) throw new Error("Agent 消息不能为空");
+    if (parts[4] === "steer") await api.steerAgent(sessionId, text);
+    else await api.followUpAgent(sessionId, text);
+    sendJson(response, 202, { ok: true });
+    return;
+  }
+  if (
+    request.method === "POST" &&
+    parts.length === 5 &&
+    parts[0] === "api" &&
+    parts[1] === "agent" &&
+    parts[2] === "sessions" &&
+    parts[4] === "abort"
+  ) {
+    await api.abortAgent(decodeSegment(parts[3]));
+    sendJson(response, 202, { ok: true });
     return;
   }
   if (

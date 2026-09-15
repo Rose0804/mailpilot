@@ -12,7 +12,7 @@ MailPilot 是一个本地优先的 Agentic 邮箱工作台，帮助用户理解�
 
 ## 当前状态
 
-当前已完成桌面端邮箱工作台 MVP、Apple Mail 只读连接器、本地 SQLite/FTS5 索引、全量账号同步、邮件与附件只读 MCP Server、附件文本索引、本地 API 和 DSH 会话适配层。桌面端可以通过本地 API 读取真实索引；写操作和 Mail.app 附件自动抓取仍未接入。
+当前已完成桌面端邮箱工作台 MVP、Apple Mail 只读连接器、本地 SQLite/FTS5 索引、全量账号同步、邮件与附件只读 MCP Server、附件文本索引、本地 API，以及以 Pi Agent Core 为默认运行时的会话链路。DSH 保留为可选兼容运行时。桌面端可以通过本地 API 读取真实索引和 Agent 审计事件；写操作和 Mail.app 附件自动抓取仍未接入。
 
 ## 技术路线
 
@@ -20,7 +20,7 @@ MailPilot 是一个本地优先的 Agentic 邮箱工作台，帮助用户理解�
 - 前端：React、TypeScript
 - 本地核心：Rust
 - 数据库：SQLite、FTS5
-- Agent Runtime：DeepSeek Harness 适配层
+- Agent Runtime：Pi Agent Core 默认运行时，DSH 兼容适配层
 - 能力连接：Model Context Protocol
 - macOS 邮箱：Apple Mail Connector
 - 凭据存储：macOS Keychain
@@ -66,7 +66,7 @@ mailpilot/
 
 ## 本地开发
 
-需要 Node.js 22 或更高版本、pnpm 10，以及通过 rustup 安装的 Rust stable 工具链。
+需要 Node.js 22.19.0 或更高版本、pnpm 10，以及通过 rustup 安装的 Rust stable 工具链。
 
 ```bash
 pnpm install
@@ -99,7 +99,7 @@ pnpm --filter @mailpilot/mcp-server exec tsx src/cli.ts
 
 MCP Server 通过 stdio 提供账号、邮箱、邮件和附件查询工具，以及 `mailpilot://message/...`、`mailpilot://attachment/...` 资源。桌面端通过本地 API 读取同一份 SQLite 索引；附件检查器的打开按钮会访问受控的本地文本预览接口。
 
-启动本地 API 后，桌面端默认访问 `http://127.0.0.1:3100`。设置 `MAILPILOT_DSH_COMMAND=dsh` 后，API 会为 DSH 生成隔离的 `DSH_HOME`、SDK profile patch，并将 MailPilot MCP 挂载到 DSH。
+启动本地 API 后，桌面端默认访问 `http://127.0.0.1:3100`。默认 Agent Runtime 是 Pi，使用 `DEEPSEEK_API_KEY` 和 `MAILPILOT_PI_MODEL`。如果需要兼容 DSH，设置 `MAILPILOT_AGENT_RUNTIME=dsh` 和 `MAILPILOT_DSH_COMMAND=dsh`；API 会为 DSH 生成隔离的 `DSH_HOME`、SDK profile patch，并将 MailPilot MCP 挂载到 DSH。
 
 检查命令：
 
@@ -116,7 +116,9 @@ pnpm --filter @mailpilot/desktop build
 - 本地附件索引器已支持 PDF、DOCX、XLSX 和文本文件；Apple Mail 连接器当前只读邮件头和正文，尚未自动提取 Mail.app 附件二进制。
 - “创建草稿”是产品交互演示，不会向 Mail.app 写入内容。
 - 发送、回复、删除和批量移动的审批策略已定义，但执行连接器尚未接入。
-- DSH 适配层只有在本机安装并配置 `dsh` 命令后才会启用；没有 DSH 时，邮件查询链路仍可独立使用。
+- Pi 默认运行时会直接使用 MailPilot 的 Pi 原生邮箱工具；MCP Server 仍作为外部 Agent 和 DSH 的标准能力接口。
+- Agent Session 元数据和可审计事件写入数据库目录下的 `agent-sessions/`；Pi 当前 transcript 由进程内 Agent 持有，跨进程恢复仍需后续接入 Pi durable session。
+- DSH 适配层只有在本机安装并配置 `dsh` 命令后才会启用；没有 Agent Runtime 时，邮件查询链路仍可独立使用。
 
 ## 开发节奏
 

@@ -836,11 +836,20 @@ h2 {
   height: 23px;
 }
 
-.agent-activity-heading > span:last-child {
+.activity-status {
   margin-left: auto;
   color: #817d73;
   font-size: 9px;
   font-weight: 600;
+}
+
+.activity-abort-button {
+  padding: 4px 7px;
+  color: #9a6359;
+  background: #f9e9e5;
+  border-radius: 5px;
+  font-size: 9px;
+  font-weight: 700;
 }
 
 .agent-event-list {

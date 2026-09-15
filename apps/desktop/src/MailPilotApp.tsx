@@ -27,12 +27,14 @@ import {
 } from "./data";
 import {
   attachmentTextUrl,
+  abortAgent,
   createAgentSession,
   getMessage,
   getSnapshot,
   sendAgentMessage,
   syncMail,
   type ApiAgentEvent,
+  type ApiAgentSession,
   type ApiAttachment,
 } from "./api";
 
@@ -105,6 +107,7 @@ function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [agentEvents, setAgentEvents] = useState<ApiAgentEvent[]>([]);
   const [agentBusy, setAgentBusy] = useState(false);
+  const [agentSession, setAgentSession] = useState<ApiAgentSession | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -256,6 +259,7 @@ function App() {
         title: "整理当前收件箱",
         accountIds: activeAccount === "all" ? undefined : [activeAccount],
       });
+      setAgentSession(session);
       const events = await sendAgentMessage(session.sessionId, "请先搜索当前范围内最需要处理的邮件，并说明依据。");
       setAgentEvents(events);
     } catch (error) {
@@ -263,8 +267,8 @@ function App() {
         {
           type: "run.failed",
           message:
-            error instanceof Error && error.message === "DSH_RUNTIME_UNAVAILABLE"
-              ? "DSH Runtime 尚未配置。邮件查询链路已可用，但推理会话需要设置 MAILPILOT_DSH_COMMAND。"
+            error instanceof Error && error.message === "AGENT_RUNTIME_UNAVAILABLE"
+              ? "Agent Runtime 尚未配置。邮件查询链路已可用，但本地推理会话尚未启用。"
               : "Agent 会话暂时不可用，请确认本地 API 正在运行。",
         },
       ]);
@@ -393,7 +397,7 @@ function App() {
               <div className="empty-list-state">
                 <Inbox size={18} />
                 <strong>{apiState === "empty" ? "本地索引还没有邮件" : "没有匹配的邮件"}</strong>
-                <span>
+                <span className="activity-status">
                   {apiState === "empty"
                     ? "先同步 Mail.app，MailPilot 会在本机建立可搜索索引。"
                     : "换一个关键词，或切换到其他账号。"}
@@ -536,7 +540,19 @@ function App() {
                   <Sparkles size={14} />
                 </span>
                 <strong>Agent session</strong>
-                <span>{agentEvents.at(-1)?.type === "run.completed" ? "Complete" : "Active"}</span>
+                <span>
+                  {agentSession?.runtime ?? "local"} ·{" "}
+                  {agentEvents.at(-1)?.type === "run.completed" ? "Complete" : agentBusy ? "Active" : "Needs attention"}
+                </span>
+                {agentBusy && agentSession && (
+                  <button
+                    className="activity-abort-button"
+                    type="button"
+                    onClick={() => void abortAgent(agentSession.sessionId)}
+                  >
+                    Stop
+                  </button>
+                )}
               </div>
               <div className="agent-event-list">
                 {agentEvents

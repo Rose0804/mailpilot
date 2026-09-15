@@ -1,9 +1,16 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AppleMailConnector } from "@mailpilot/apple-mail-connector";
-import { JsonLineDshTransport, DshRuntimeAdapter } from "@mailpilot/agent-runtime";
+import {
+  DshRuntimeAdapter,
+  FileSessionStore,
+  JsonLineDshTransport,
+  PiAgentRuntime,
+} from "@mailpilot/agent-runtime";
+import type { AgentRuntime } from "@mailpilot/agent-runtime";
 import { MailDatabase } from "@mailpilot/database";
+import { createDatabaseQueryService, createMailPilotAgentTools } from "@mailpilot/mcp-server";
 import { MailSyncService } from "@mailpilot/sync";
 import { createLocalApiServer, MailPilotLocalApi } from "./index.js";
 
@@ -14,40 +21,56 @@ await mkdir(dirname(databasePath), { recursive: true });
 const projectRoot = resolve(
   process.env.MAILPILOT_PROJECT_ROOT ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../.."),
 );
-const mcpPatchPath = await writeMcpPatch(projectRoot, databasePath);
 
 const database = new MailDatabase(databasePath);
 const reader = new AppleMailConnector();
+const queryService = createDatabaseQueryService(database);
+const sessionStore = new FileSessionStore(resolve(dirname(databasePath), "agent-sessions"));
+const runtimeName = process.env.MAILPILOT_AGENT_RUNTIME ?? "pi";
 const runtimeCommand = process.env.MAILPILOT_DSH_COMMAND;
-const dshHome = resolve(
-  process.env.MAILPILOT_DSH_HOME ??
-    process.env.DSH_HOME ??
-    resolve(dirname(databasePath), "dsh-home"),
-);
-await mkdir(dshHome, { recursive: true });
-const runtime = runtimeCommand
-  ? new DshRuntimeAdapter(
-      new JsonLineDshTransport({
-        command: runtimeCommand,
-        args: process.env.MAILPILOT_DSH_ARGS
-          ? JSON.parse(process.env.MAILPILOT_DSH_ARGS)
-          : [
-              "--profile",
-              process.env.MAILPILOT_DSH_PROFILE ?? "sdk",
-              "--patch",
-              process.env.MAILPILOT_DSH_PATCH ?? mcpPatchPath,
-            ],
-        cwd: process.env.MAILPILOT_DSH_CWD,
-        env: { DSH_HOME: dshHome },
-        provider: process.env.MAILPILOT_DSH_PROVIDER ?? "deepseek-official",
-        model: process.env.MAILPILOT_DSH_MODEL ?? "deepseek-v4-flash",
-        reasoningEffort: process.env.MAILPILOT_DSH_REASONING_EFFORT,
-        maxTokens: process.env.MAILPILOT_DSH_MAX_TOKENS
-          ? Number(process.env.MAILPILOT_DSH_MAX_TOKENS)
-          : undefined,
-      }),
-    )
-  : undefined;
+let runtime: AgentRuntime | undefined;
+if (runtimeName === "dsh") {
+  if (!runtimeCommand) {
+    throw new Error("MAILPILOT_AGENT_RUNTIME=dsh 时必须设置 MAILPILOT_DSH_COMMAND");
+  }
+  const dshHome = resolve(
+    process.env.MAILPILOT_DSH_HOME ??
+      process.env.DSH_HOME ??
+      resolve(dirname(databasePath), "dsh-home"),
+  );
+  await mkdir(dshHome, { recursive: true });
+  const mcpPatchPath = await writeMcpPatch(projectRoot, databasePath);
+  runtime = new DshRuntimeAdapter(
+    new JsonLineDshTransport({
+      command: runtimeCommand,
+      args: process.env.MAILPILOT_DSH_ARGS
+        ? JSON.parse(process.env.MAILPILOT_DSH_ARGS)
+        : [
+            "--profile",
+            process.env.MAILPILOT_DSH_PROFILE ?? "sdk",
+            "--patch",
+            process.env.MAILPILOT_DSH_PATCH ?? mcpPatchPath,
+          ],
+      cwd: process.env.MAILPILOT_DSH_CWD,
+      env: { DSH_HOME: dshHome },
+      provider: process.env.MAILPILOT_DSH_PROVIDER ?? "deepseek-official",
+      model: process.env.MAILPILOT_DSH_MODEL ?? "deepseek-v4-flash",
+      reasoningEffort: process.env.MAILPILOT_DSH_REASONING_EFFORT,
+      maxTokens: process.env.MAILPILOT_DSH_MAX_TOKENS
+        ? Number(process.env.MAILPILOT_DSH_MAX_TOKENS)
+        : undefined,
+    }),
+  );
+} else if (runtimeName === "pi") {
+  runtime = new PiAgentRuntime({
+    sessionStore,
+    modelId: process.env.MAILPILOT_PI_MODEL ?? "deepseek-v4-flash",
+    thinkingLevel: parseThinkingLevel(process.env.MAILPILOT_PI_THINKING_LEVEL),
+    toolsFactory: (session) => createMailPilotAgentTools(queryService, session.accountIds),
+  });
+} else if (runtimeName !== "none") {
+  throw new Error(`不支持的 MAILPILOT_AGENT_RUNTIME: ${runtimeName}`);
+}
 const api = new MailPilotLocalApi({
   database,
   reader,
@@ -56,7 +79,7 @@ const api = new MailPilotLocalApi({
 });
 const port = Number(process.env.MAILPILOT_PORT ?? 3100);
 const server = createLocalApiServer(api, port);
-console.error(`MailPilot local API 已启动: http://127.0.0.1:${port}`);
+console.error(`MailPilot local API 已启动: http://127.0.0.1:${port}（Agent Runtime: ${runtime?.runtimeName ?? "none"}）`);
 
 const shutdown = async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -97,4 +120,15 @@ function parseStringArray(value: string, name: string): string[] {
     throw new Error(`${name} 必须是 JSON 字符串数组`);
   }
   return parsed;
+}
+
+function parseThinkingLevel(
+  value: string | undefined,
+): "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | undefined {
+  if (!value) return undefined;
+  const values = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+  if (!values.includes(value as (typeof values)[number])) {
+    throw new Error(`MAILPILOT_PI_THINKING_LEVEL 无效: ${value}`);
+  }
+  return value as (typeof values)[number];
 }

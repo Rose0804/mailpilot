@@ -57,6 +57,7 @@ mailpilot://attachment/<account-id>/<attachment-id>/text
 - `get_message`
 - `search_attachments`
 - `get_attachment_metadata`
+- `get_attachment_text`
 - `mailpilot://message/{accountId}/{mailboxId}/{messageId}`
 - `mailpilot://attachment/{accountId}/{attachmentId}/text`
 - `mailpilot://attachment/{accountId}/{attachmentId}/preview`

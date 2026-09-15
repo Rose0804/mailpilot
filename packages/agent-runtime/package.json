@@ -14,6 +14,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "^0.85.1",
+    "@earendil-works/pi-ai": "^0.85.1",
     "@mailpilot/domain": "workspace:*"
   },
   "devDependencies": {

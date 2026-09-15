@@ -1,13 +1,47 @@
 # Agent Runtime
 
-本包是 MailPilot 与 DeepSeek Harness 之间的适配边界。
+本包是 MailPilot 产品 Session 与 Agent 执行器之间的适配边界。
 
 ## 设计
 
-- DSH 负责会话、推理、工具选择和事件流。
-- MailPilot MCP Server 负责邮箱工具和稳定资源。
-- MailPilot Policy 负责账号作用域、审批和审计，DSH 不是安全边界。
-- UI 只订阅 `AgentEvent`，不解析 DSH 私有协议。
+- Pi Agent Core 默认负责推理循环、工具选择、流式事件、steer、follow-up 和 abort。
+- DSH 通过 `DshRuntimeAdapter` 作为可选兼容运行时。
+- MailPilot MCP Server 负责标准 MCP 工具和稳定资源；Pi 默认直接复用同一查询服务生成原生工具。
+- MailPilot Policy 负责账号作用域、审批和审计，任何 Agent runtime 都不是安全边界。
+- UI 只订阅 MailPilot `AgentEvent`，不解析 Pi 或 DSH 的隐式思维链。
+
+## 统一契约
+
+`AgentRuntime` 提供：
+
+```text
+createSession
+streamMessage
+steer
+followUp
+abort
+respondToApproval
+getSession
+listEvents
+closeSession
+close
+```
+
+产品 Session 包含 `runtime`、账号作用域、状态、轮次和时间戳。`FileSessionStore` 将元数据和审计事件写入 JSON 文件；Pi 的完整上下文 transcript 目前仍由进程内 `Agent` 持有。
+
+## Pi 默认链路
+
+```text
+Local API
+  -> PiAgentRuntime
+  -> @earendil-works/pi-agent-core Agent
+  -> Pi AgentTool[]
+  -> MailPilot database / attachment index
+  -> AgentEvent
+  -> FileSessionStore + Desktop UI
+```
+
+模型默认是 `deepseek-v4-flash`，由 `@earendil-works/pi-ai/providers/deepseek` 提供。模型密钥由 `DEEPSEEK_API_KEY` 提供。
 
 当前提供 `DshRuntimeAdapter` 和 `JsonLineDshTransport`。后者对接 DSH SDK 的 stdin/stdout JSON-RPC：
 

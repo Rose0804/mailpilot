@@ -19,6 +19,7 @@
     "@mailpilot/apple-mail-connector": "workspace:*",
     "@mailpilot/database": "workspace:*",
     "@mailpilot/domain": "workspace:*",
+    "@mailpilot/mcp-server": "workspace:*",
     "@mailpilot/sync": "workspace:*"
   },
   "devDependencies": {
